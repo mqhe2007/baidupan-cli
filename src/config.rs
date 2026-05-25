@@ -15,6 +15,8 @@ pub const AUTH_SERVER_ENV: &str = "BAIDUPAN_AUTH_SERVER";
 pub const CRYPTO_PASSPHRASE_ENV: &str = "BAIDUPAN_CRYPTO_PASSPHRASE";
 pub const USER_AGENT: &str = "pan.baidu.com";
 
+const BUILTIN_APP_KEY: Option<&str> = option_env!("BAIDUPAN_DEFAULT_APP_KEY");
+const BUILTIN_APP_SECRET: Option<&str> = option_env!("BAIDUPAN_DEFAULT_APP_SECRET");
 const BUILTIN_APP_NAME: Option<&str> = option_env!("BAIDUPAN_DEFAULT_APP_NAME");
 const BUILTIN_AUTH_SERVER: Option<&str> = option_env!("BAIDUPAN_DEFAULT_AUTH_SERVER");
 const BUILTIN_CRYPTO_PASSPHRASE: Option<&str> = option_env!("BAIDUPAN_DEFAULT_CRYPTO_PASSPHRASE");
@@ -37,8 +39,8 @@ impl AppCredentials {
     }
 
     fn from_env_with_mode(allow_auth_server: bool) -> Result<Self> {
-        let app_key = env::var(APP_KEY_ENV).ok().and_then(normalize_env_value);
-        let app_secret = env::var(APP_SECRET_ENV).ok().and_then(normalize_env_value);
+        let app_key = read_config_value(APP_KEY_ENV, BUILTIN_APP_KEY);
+        let app_secret = read_config_value(APP_SECRET_ENV, BUILTIN_APP_SECRET);
         let app_name = read_config_value(APP_NAME_ENV, BUILTIN_APP_NAME)
             .ok_or(Error::MissingEnv(APP_NAME_ENV))?;
         let auth_server = if allow_auth_server {

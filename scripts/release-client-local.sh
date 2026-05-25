@@ -20,8 +20,9 @@ Targets:
 
 Environment:
   - Reads .env automatically when present
-  - Maps BAIDUPAN_APP_NAME, BAIDUPAN_AUTH_SERVER, BAIDUPAN_CRYPTO_PASSPHRASE
-    to baidupan-cli compile-time defaults unless BAIDUPAN_DEFAULT_* is already set
+  - Maps BAIDUPAN_APP_KEY, BAIDUPAN_APP_SECRET, BAIDUPAN_APP_NAME,
+    BAIDUPAN_AUTH_SERVER, BAIDUPAN_CRYPTO_PASSPHRASE to compile-time defaults
+    unless BAIDUPAN_DEFAULT_* is already set
   - BAIDUPAN_AUTH_SERVER is optional for local toolkit builds; when omitted, the
     packaged client has no built-in auth server default
 
@@ -52,6 +53,8 @@ fi
 export BAIDUPAN_DEFAULT_APP_NAME="${BAIDUPAN_DEFAULT_APP_NAME:-${BAIDUPAN_APP_NAME:-}}"
 export BAIDUPAN_DEFAULT_AUTH_SERVER="${BAIDUPAN_DEFAULT_AUTH_SERVER:-${BAIDUPAN_AUTH_SERVER:-}}"
 export BAIDUPAN_DEFAULT_CRYPTO_PASSPHRASE="${BAIDUPAN_DEFAULT_CRYPTO_PASSPHRASE:-${BAIDUPAN_CRYPTO_PASSPHRASE:-}}"
+export BAIDUPAN_DEFAULT_APP_KEY="${BAIDUPAN_DEFAULT_APP_KEY:-${BAIDUPAN_APP_KEY:-}}"
+export BAIDUPAN_DEFAULT_APP_SECRET="${BAIDUPAN_DEFAULT_APP_SECRET:-${BAIDUPAN_APP_SECRET:-}}"
 
 if [[ -z "$BAIDUPAN_DEFAULT_APP_NAME" ]]; then
   echo "error: BAIDUPAN_APP_NAME or BAIDUPAN_DEFAULT_APP_NAME is required" >&2
