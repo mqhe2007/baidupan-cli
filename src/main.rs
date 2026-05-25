@@ -115,7 +115,7 @@ async fn run() -> Result<()> {
             let credentials = AppCredentials::from_env()?;
             let plan = TransferPlanner::new()?;
             let upload_store = UploadStateStore::for_current_user()?;
-            let session_remote = resolve_remote_path(&credentials, &remote)?;
+            let session_remote = resolve_upload_remote_path(&credentials, &local, &remote)?;
             let session_key = upload_store.session_key(&local, &session_remote, encrypt)?;
             let cache_path = encrypt.then(|| upload_store.cache_path(&session_key));
             let prepared =
@@ -458,7 +458,7 @@ async fn run_upload(
 ) -> Result<baidupan_cli::api::UploadSummary> {
     let plan = TransferPlanner::new()?;
     let upload_store = UploadStateStore::for_current_user()?;
-    let session_remote = resolve_remote_path(credentials, remote)?;
+    let session_remote = resolve_upload_remote_path(credentials, local, remote)?;
     let session_key = upload_store.session_key(local, &session_remote, encrypt)?;
     let cache_path = encrypt.then(|| upload_store.cache_path(&session_key));
     let prepared = plan.prepare_upload_with_cache(local, encrypt, cache_path.as_deref())?;
@@ -630,6 +630,25 @@ fn resolve_remote_path(credentials: &AppCredentials, path: &str) -> Result<Strin
     Ok(format!("{}/{}", credentials.app_root(), relative))
 }
 
+fn resolve_upload_remote_path(
+    credentials: &AppCredentials,
+    local: &std::path::Path,
+    remote: &str,
+) -> Result<String> {
+    let trimmed = remote.trim();
+    let remote_path = resolve_remote_path(credentials, remote)?;
+
+    if trimmed == "/" || trimmed.ends_with('/') {
+        let file_name = local
+            .file_name()
+            .and_then(|name| name.to_str())
+            .ok_or_else(|| Error::InvalidRemotePath(local.display().to_string()))?;
+        return Ok(format!("{}/{file_name}", remote_path.trim_end_matches('/')));
+    }
+
+    Ok(remote_path)
+}
+
 fn init_tracing(verbose: u8) {
     let default_filter = match verbose {
         0 => "warn",
@@ -707,5 +726,40 @@ mod tests {
         assert!(error
             .to_string()
             .contains("do not include the /apps/<app_name> prefix"));
+    }
+
+    #[test]
+    fn resolves_upload_root_to_local_file_name() {
+        assert_eq!(
+            resolve_upload_remote_path(&credentials(), std::path::Path::new("files/test.txt"), "/")
+                .expect("upload root"),
+            "/apps/demo-app/test.txt"
+        );
+    }
+
+    #[test]
+    fn resolves_upload_directory_to_local_file_name() {
+        assert_eq!(
+            resolve_upload_remote_path(
+                &credentials(),
+                std::path::Path::new("files/test.txt"),
+                "docs/"
+            )
+            .expect("upload directory"),
+            "/apps/demo-app/docs/test.txt"
+        );
+    }
+
+    #[test]
+    fn resolves_explicit_upload_file_path() {
+        assert_eq!(
+            resolve_upload_remote_path(
+                &credentials(),
+                std::path::Path::new("files/test.txt"),
+                "docs/renamed.txt"
+            )
+            .expect("explicit file path"),
+            "/apps/demo-app/docs/renamed.txt"
+        );
     }
 }

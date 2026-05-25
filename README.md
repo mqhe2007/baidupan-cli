@@ -142,6 +142,7 @@ cargo run -- download demo/local.txt ./local.txt --force
 说明：
 
 - 远端路径参数都是相对于应用目录的路径；`/` 表示当前应用的根目录，也就是 `/apps/$BAIDUPAN_APP_NAME`。
+- `upload` 传入的远端参数如果是 `/` 或以 `/` 结尾的目录路径，CLI 会自动追加本地文件名作为目标文件名。
 - 命令行里不要手动写 `/apps/<应用名>/` 这一段，CLI 会自动补齐。
 - `--encrypt` 会先在本地加密，再把密文上传到网盘。
 - `--decrypt` 适用于下载由本客户端加密上传的文件。
