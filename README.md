@@ -37,7 +37,7 @@
 - `BAIDUPAN_APP_KEY`: 百度开放平台 AppKey。开发或直连认证模式需要
 - `BAIDUPAN_APP_SECRET`: 百度开放平台 SecretKey。开发或直连认证模式需要
 - `BAIDUPAN_APP_NAME`: 百度开放平台申请接入时填写的产品名称。CLI 会自动把所有远端路径映射到 `/apps/<应用名>/...`
-- `BAIDUPAN_AUTH_SERVER`: 可选。认证后端地址，例如 `https://auth.example.com`。设置后，CLI 的登录和 token 刷新会走你的后端，不再要求终端用户本地提供 `BAIDUPAN_APP_SECRET`
+- `BAIDUPAN_AUTH_SERVER`: 可选。认证后端地址，例如 `https://auth.example.com`。设置后，CLI 的登录和 token 刷新会走你的后端，不再要求终端用户本地提供 `BAIDUPAN_APP_SECRET`。若未设置此变量且本地也未提供 `BAIDUPAN_APP_SECRET`，CLI 会自动回退到内置公共认证服务 `https://mengqinghe.com/baidupan-cli/auth`；**建议自行部署认证后端以保障可用性和数据安全**
 - `BAIDUPAN_CRYPTO_PASSPHRASE`: 可选。上传加密或下载解密时优先读取；未设置时会在终端交互输入
 
 ## 构建
@@ -118,6 +118,7 @@ export BAIDUPAN_AUTH_SERVER=http://your-server:28681
 - 认证后端必须部署在你控制的机器上，不要随 CLI 一起分发给终端用户。
 - 终端用户侧不再需要 `BAIDUPAN_APP_SECRET`。
 - 认证后端当前只转发 OAuth 相关能力，现有文件上传下载仍由 CLI 直接调用百度网盘开放平台。
+- 若未配置 `BAIDUPAN_AUTH_SERVER` 且本地也未提供 `BAIDUPAN_APP_SECRET`，CLI 会自动使用内置公共认证服务 `https://mengqinghe.com/baidupan-cli/auth`。该服务仅供快速体验，**强烈建议面向真实用户时自行部署认证后端**。
 
 ## 目录与文件命令
 
