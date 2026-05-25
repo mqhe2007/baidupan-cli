@@ -1,0 +1,96 @@
+name: release-client
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: Build client (${{ matrix.label }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            label: linux-x86_64
+            binary_name: baidupan-cli
+            archive_ext: tar.gz
+          - os: macos-13
+            label: macos-x86_64
+            binary_name: baidupan-cli
+            archive_ext: tar.gz
+          - os: windows-latest
+            label: windows-x86_64
+            binary_name: baidupan-cli.exe
+            archive_ext: zip
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Restore Cargo cache
+        uses: Swatinem/rust-cache@v2
+
+      - name: Build client binary
+        env:
+          BAIDUPAN_DEFAULT_APP_NAME: ${{ secrets.BAIDUPAN_APP_NAME }}
+          BAIDUPAN_DEFAULT_AUTH_SERVER: ${{ secrets.BAIDUPAN_AUTH_SERVER }}
+          BAIDUPAN_DEFAULT_CRYPTO_PASSPHRASE: ${{ secrets.BAIDUPAN_CRYPTO_PASSPHRASE }}
+        run: cargo build --locked --release --bin baidupan-cli
+
+      - name: Package client archive (Unix)
+        if: runner.os != 'Windows'
+        id: package_unix
+        shell: bash
+        run: |
+          asset="baidupan-cli-${GITHUB_REF_NAME}-${{ matrix.label }}.${{ matrix.archive_ext }}"
+          tar -czf "$asset" -C target/release "${{ matrix.binary_name }}"
+          echo "asset=$asset" >> "$GITHUB_OUTPUT"
+
+      - name: Package client archive (Windows)
+        if: runner.os == 'Windows'
+        id: package_windows
+        shell: pwsh
+        run: |
+          $asset = "baidupan-cli-$env:GITHUB_REF_NAME-${{ matrix.label }}.${{ matrix.archive_ext }}"
+          Compress-Archive -Path "target/release/${{ matrix.binary_name }}" -DestinationPath $asset
+          "asset=$asset" >> $env:GITHUB_OUTPUT
+
+      - name: Upload packaged artifact (Unix)
+        if: runner.os != 'Windows'
+        uses: actions/upload-artifact@v4
+        with:
+          name: client-${{ matrix.label }}
+          path: ${{ steps.package_unix.outputs.asset }}
+
+      - name: Upload packaged artifact (Windows)
+        if: runner.os == 'Windows'
+        uses: actions/upload-artifact@v4
+        with:
+          name: client-${{ matrix.label }}
+          path: ${{ steps.package_windows.outputs.asset }}
+
+  release:
+    name: Publish GitHub Release
+    runs-on: ubuntu-latest
+    needs: build
+
+    steps:
+      - name: Download packaged artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: dist
+
+      - name: Publish release assets
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/**/*
+          generate_release_notes: true

@@ -1,4 +1,3 @@
-use std::env;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::time::UNIX_EPOCH;
@@ -8,7 +7,7 @@ use md5::Digest;
 use serde::{Deserialize, Serialize};
 use tempfile::NamedTempFile;
 
-use crate::config::CRYPTO_PASSPHRASE_ENV;
+use crate::config::configured_crypto_passphrase;
 use crate::crypto::{decrypt_bytes, encrypt_bytes};
 use crate::error::{IoContext, Result};
 
@@ -358,10 +357,8 @@ fn cleanup_if_exists(path: &Path) -> Result<()> {
 }
 
 fn read_passphrase() -> Result<String> {
-    if let Ok(passphrase) = env::var(CRYPTO_PASSPHRASE_ENV) {
-        if !passphrase.is_empty() {
-            return Ok(passphrase);
-        }
+    if let Some(passphrase) = configured_crypto_passphrase() {
+        return Ok(passphrase);
     }
 
     let prompt = "Encryption passphrase: ";

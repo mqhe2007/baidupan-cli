@@ -15,6 +15,10 @@ pub const AUTH_SERVER_ENV: &str = "BAIDUPAN_AUTH_SERVER";
 pub const CRYPTO_PASSPHRASE_ENV: &str = "BAIDUPAN_CRYPTO_PASSPHRASE";
 pub const USER_AGENT: &str = "pan.baidu.com";
 
+const BUILTIN_APP_NAME: Option<&str> = option_env!("BAIDUPAN_DEFAULT_APP_NAME");
+const BUILTIN_AUTH_SERVER: Option<&str> = option_env!("BAIDUPAN_DEFAULT_AUTH_SERVER");
+const BUILTIN_CRYPTO_PASSPHRASE: Option<&str> = option_env!("BAIDUPAN_DEFAULT_CRYPTO_PASSPHRASE");
+
 #[derive(Debug, Clone)]
 pub struct AppCredentials {
     pub app_key: Option<String>,
@@ -35,11 +39,10 @@ impl AppCredentials {
     fn from_env_with_mode(allow_auth_server: bool) -> Result<Self> {
         let app_key = env::var(APP_KEY_ENV).ok().and_then(normalize_env_value);
         let app_secret = env::var(APP_SECRET_ENV).ok().and_then(normalize_env_value);
-        let app_name = env::var(APP_NAME_ENV).map_err(|_| Error::MissingEnv(APP_NAME_ENV))?;
+        let app_name = read_config_value(APP_NAME_ENV, BUILTIN_APP_NAME)
+            .ok_or(Error::MissingEnv(APP_NAME_ENV))?;
         let auth_server = if allow_auth_server {
-            env::var(AUTH_SERVER_ENV)
-                .ok()
-                .and_then(normalize_env_value)
+            read_config_value(AUTH_SERVER_ENV, BUILTIN_AUTH_SERVER)
                 .map(|url| url.trim_end_matches('/').to_string())
         } else {
             None
@@ -170,6 +173,10 @@ pub fn current_unix_timestamp() -> Result<i64> {
     Ok(now.as_secs() as i64)
 }
 
+pub fn configured_crypto_passphrase() -> Option<String> {
+    read_config_value(CRYPTO_PASSPHRASE_ENV, BUILTIN_CRYPTO_PASSPHRASE)
+}
+
 fn mask_secret(value: &str) -> String {
     let chars: Vec<char> = value.chars().collect();
     if chars.len() <= 8 {
@@ -195,6 +202,13 @@ fn normalize_env_value(value: String) -> Option<String> {
     } else {
         Some(trimmed.to_string())
     }
+}
+
+fn read_config_value(env_name: &str, builtin: Option<&str>) -> Option<String> {
+    env::var(env_name)
+        .ok()
+        .and_then(normalize_env_value)
+        .or_else(|| builtin.and_then(|value| normalize_env_value(value.to_string())))
 }
 
 #[cfg(test)]
@@ -256,6 +270,27 @@ mod tests {
         };
 
         assert_eq!(credentials.app_root(), "/apps/demo-app");
+    }
+
+    #[test]
+    fn runtime_value_overrides_builtin_default() {
+        let _guard = env_lock().lock().expect("env lock");
+        std::env::set_var(APP_NAME_ENV, "runtime-app");
+
+        let configured = read_config_value(APP_NAME_ENV, Some("built-in-app"));
+
+        assert_eq!(configured.as_deref(), Some("runtime-app"));
+        std::env::remove_var(APP_NAME_ENV);
+    }
+
+    #[test]
+    fn builtin_default_is_used_when_runtime_is_missing() {
+        let _guard = env_lock().lock().expect("env lock");
+        std::env::remove_var(APP_NAME_ENV);
+
+        let configured = read_config_value(APP_NAME_ENV, Some("built-in-app"));
+
+        assert_eq!(configured.as_deref(), Some("built-in-app"));
     }
 
     #[test]
