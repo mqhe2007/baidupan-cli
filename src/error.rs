@@ -5,6 +5,9 @@ pub enum Error {
     #[error("missing environment variable {0}")]
     MissingEnv(&'static str),
 
+    #[error("invalid configuration: {0}")]
+    InvalidConfig(String),
+
     #[error("HTTP request failed: {0}")]
     Http(#[from] reqwest::Error),
 

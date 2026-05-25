@@ -15,6 +15,19 @@ fn login_requires_app_key() {
 }
 
 #[test]
+fn login_requires_app_name() {
+    let mut command = Command::cargo_bin("baidupan-cli").expect("binary");
+    command
+        .arg("login")
+        .env("BAIDUPAN_APP_KEY", "key")
+        .env("BAIDUPAN_APP_SECRET", "secret")
+        .env_remove("BAIDUPAN_APP_NAME")
+        .assert()
+        .failure()
+        .stderr(contains("missing environment variable BAIDUPAN_APP_NAME"));
+}
+
+#[test]
 fn whoami_requires_login() {
     let temp_dir = tempfile::tempdir().expect("temp dir");
     let mut command = Command::cargo_bin("baidupan-cli").expect("binary");
@@ -31,7 +44,7 @@ fn whoami_requires_login() {
 fn batch_requires_login() {
     let temp_dir = tempfile::tempdir().expect("temp dir");
     let manifest = temp_dir.path().join("tasks.json");
-    fs::write(&manifest, r#"[{"type":"mkdir","path":"/apps/demo"}]"#).expect("write manifest");
+    fs::write(&manifest, r#"[{"type":"mkdir","path":"demo"}]"#).expect("write manifest");
 
     let mut command = Command::cargo_bin("baidupan-cli").expect("binary");
     command

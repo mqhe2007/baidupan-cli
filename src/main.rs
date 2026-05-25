@@ -4,7 +4,7 @@ use baidupan_cli::batch::{load_batch_tasks, BatchReport, BatchTask, BatchTaskRes
 use baidupan_cli::cli::{BaidupanCli, Commands};
 use baidupan_cli::config::{AppCredentials, TokenStore};
 use baidupan_cli::transfer::{TransferPlanner, UploadResumeState, UploadStateStore};
-use baidupan_cli::Result;
+use baidupan_cli::{Error, Result};
 use clap::Parser;
 use indicatif::{ProgressBar, ProgressStyle};
 use tracing_subscriber::EnvFilter;
@@ -55,8 +55,10 @@ async fn run() -> Result<()> {
             println!("expires_at: {}", token.expires_at);
         }
         Commands::Ls { path } => {
-            let client = PanClient::new(AppCredentials::from_env()?, token_store.clone())?;
-            let entries = client.list_dir(&path).await?;
+            let credentials = AppCredentials::from_env()?;
+            let remote_path = resolve_remote_path(&credentials, &path)?;
+            let client = PanClient::new(credentials, token_store.clone())?;
+            let entries = client.list_dir(&remote_path).await?;
 
             if cli.json {
                 println!("{}", serde_json::to_string_pretty(&entries)?);
@@ -71,33 +73,44 @@ async fn run() -> Result<()> {
             }
         }
         Commands::Mkdir { path } => {
-            let client = PanClient::new(AppCredentials::from_env()?, token_store.clone())?;
-            client.mkdir(&path).await?;
-            println!("created {path}");
+            let credentials = AppCredentials::from_env()?;
+            let remote_path = resolve_remote_path(&credentials, &path)?;
+            let client = PanClient::new(credentials, token_store.clone())?;
+            client.mkdir(&remote_path).await?;
+            println!("created {remote_path}");
         }
         Commands::Rm { path } => {
-            let client = PanClient::new(AppCredentials::from_env()?, token_store.clone())?;
-            client.delete(&path).await?;
-            println!("removed {path}");
+            let credentials = AppCredentials::from_env()?;
+            let remote_path = resolve_remote_path(&credentials, &path)?;
+            let client = PanClient::new(credentials, token_store.clone())?;
+            client.delete(&remote_path).await?;
+            println!("removed {remote_path}");
         }
         Commands::Mv { from, to } => {
-            let client = PanClient::new(AppCredentials::from_env()?, token_store.clone())?;
-            client.move_path(&from, &to).await?;
-            println!("moved {from} -> {to}");
+            let credentials = AppCredentials::from_env()?;
+            let from_path = resolve_remote_path(&credentials, &from)?;
+            let to_path = resolve_remote_path(&credentials, &to)?;
+            let client = PanClient::new(credentials, token_store.clone())?;
+            client.move_path(&from_path, &to_path).await?;
+            println!("moved {from_path} -> {to_path}");
         }
         Commands::Cp { from, to } => {
-            let client = PanClient::new(AppCredentials::from_env()?, token_store.clone())?;
-            client.copy_path(&from, &to).await?;
-            println!("copied {from} -> {to}");
+            let credentials = AppCredentials::from_env()?;
+            let from_path = resolve_remote_path(&credentials, &from)?;
+            let to_path = resolve_remote_path(&credentials, &to)?;
+            let client = PanClient::new(credentials, token_store.clone())?;
+            client.copy_path(&from_path, &to_path).await?;
+            println!("copied {from_path} -> {to_path}");
         }
         Commands::Upload {
             local,
             remote,
             encrypt,
         } => {
+            let credentials = AppCredentials::from_env()?;
             let plan = TransferPlanner::new()?;
             let upload_store = UploadStateStore::for_current_user()?;
-            let session_remote = normalize_remote_for_session(&remote);
+            let session_remote = resolve_remote_path(&credentials, &remote)?;
             let session_key = upload_store.session_key(&local, &session_remote, encrypt)?;
             let cache_path = encrypt.then(|| upload_store.cache_path(&session_key));
             let prepared =
@@ -117,7 +130,7 @@ async fn run() -> Result<()> {
                     )
                 })
                 .map(|state| state.uploadid.as_str());
-            let client = PanClient::new(AppCredentials::from_env()?, token_store.clone())?;
+            let client = PanClient::new(credentials, token_store.clone())?;
             let progress = (!cli.json).then(|| transfer_progress_bar("upload", prepared.size));
             let callback_progress = progress.clone();
             let callback_store = upload_store.clone();
@@ -180,7 +193,7 @@ async fn run() -> Result<()> {
                     return Err(baidupan_cli::Error::Api(format!(
                         "upload {} -> {} failed: {}",
                         local.display(),
-                        remote,
+                        session_remote,
                         error
                     )));
                 }
@@ -202,14 +215,16 @@ async fn run() -> Result<()> {
             decrypt,
             force,
         } => {
+            let credentials = AppCredentials::from_env()?;
+            let remote_path = resolve_remote_path(&credentials, &remote)?;
             let plan = TransferPlanner::new()?;
-            let prepared = plan.prepare_download(&remote, &local, decrypt, force)?;
-            let client = PanClient::new(AppCredentials::from_env()?, token_store.clone())?;
+            let prepared = plan.prepare_download(&remote_path, &local, decrypt, force)?;
+            let client = PanClient::new(credentials, token_store.clone())?;
             let progress = (!cli.json).then(|| transfer_progress_bar("download", 0));
             let callback_progress = progress.clone();
             let mut result = match client
                 .download_file(
-                    &remote,
+                    &remote_path,
                     &prepared.temp_path,
                     prepared.resume_from,
                     move |current, total| {
@@ -227,7 +242,7 @@ async fn run() -> Result<()> {
                     }
                     return Err(baidupan_cli::Error::Api(format!(
                         "download {} -> {} failed: {}",
-                        remote,
+                        remote_path,
                         local.display(),
                         error
                     )));
@@ -347,33 +362,49 @@ async fn execute_batch_task(
     token_store: &TokenStore,
     json_mode: bool,
 ) -> Result<serde_json::Value> {
+    let credentials = AppCredentials::from_env()?;
+
     match task {
         BatchTask::Mkdir { path } => {
-            let client = PanClient::new(AppCredentials::from_env()?, token_store.clone())?;
-            client.mkdir(path).await?;
-            Ok(serde_json::json!({"path": path}))
+            let remote_path = resolve_remote_path(&credentials, path)?;
+            let client = PanClient::new(credentials, token_store.clone())?;
+            client.mkdir(&remote_path).await?;
+            Ok(serde_json::json!({"path": remote_path}))
         }
         BatchTask::Rm { path } => {
-            let client = PanClient::new(AppCredentials::from_env()?, token_store.clone())?;
-            client.delete(path).await?;
-            Ok(serde_json::json!({"path": path}))
+            let remote_path = resolve_remote_path(&credentials, path)?;
+            let client = PanClient::new(credentials, token_store.clone())?;
+            client.delete(&remote_path).await?;
+            Ok(serde_json::json!({"path": remote_path}))
         }
         BatchTask::Mv { from, to } => {
-            let client = PanClient::new(AppCredentials::from_env()?, token_store.clone())?;
-            client.move_path(from, to).await?;
-            Ok(serde_json::json!({"from": from, "to": to}))
+            let from_path = resolve_remote_path(&credentials, from)?;
+            let to_path = resolve_remote_path(&credentials, to)?;
+            let client = PanClient::new(credentials, token_store.clone())?;
+            client.move_path(&from_path, &to_path).await?;
+            Ok(serde_json::json!({"from": from_path, "to": to_path}))
         }
         BatchTask::Cp { from, to } => {
-            let client = PanClient::new(AppCredentials::from_env()?, token_store.clone())?;
-            client.copy_path(from, to).await?;
-            Ok(serde_json::json!({"from": from, "to": to}))
+            let from_path = resolve_remote_path(&credentials, from)?;
+            let to_path = resolve_remote_path(&credentials, to)?;
+            let client = PanClient::new(credentials, token_store.clone())?;
+            client.copy_path(&from_path, &to_path).await?;
+            Ok(serde_json::json!({"from": from_path, "to": to_path}))
         }
         BatchTask::Upload {
             local,
             remote,
             encrypt,
         } => {
-            let summary = run_upload(local, remote, *encrypt, token_store, json_mode).await?;
+            let summary = run_upload(
+                local,
+                remote,
+                *encrypt,
+                &credentials,
+                token_store,
+                json_mode,
+            )
+            .await?;
             Ok(serde_json::to_value(summary)?)
         }
         BatchTask::Download {
@@ -382,8 +413,16 @@ async fn execute_batch_task(
             decrypt,
             force,
         } => {
-            let summary =
-                run_download(remote, local, *decrypt, *force, token_store, json_mode).await?;
+            let summary = run_download(
+                remote,
+                local,
+                *decrypt,
+                *force,
+                &credentials,
+                token_store,
+                json_mode,
+            )
+            .await?;
             Ok(serde_json::to_value(summary)?)
         }
     }
@@ -408,12 +447,13 @@ async fn run_upload(
     local: &std::path::Path,
     remote: &str,
     encrypt: bool,
+    credentials: &AppCredentials,
     token_store: &TokenStore,
     json_mode: bool,
 ) -> Result<baidupan_cli::api::UploadSummary> {
     let plan = TransferPlanner::new()?;
     let upload_store = UploadStateStore::for_current_user()?;
-    let session_remote = normalize_remote_for_session(remote);
+    let session_remote = resolve_remote_path(credentials, remote)?;
     let session_key = upload_store.session_key(local, &session_remote, encrypt)?;
     let cache_path = encrypt.then(|| upload_store.cache_path(&session_key));
     let prepared = plan.prepare_upload_with_cache(local, encrypt, cache_path.as_deref())?;
@@ -432,7 +472,7 @@ async fn run_upload(
             )
         })
         .map(|state| state.uploadid.as_str());
-    let client = PanClient::new(AppCredentials::from_env()?, token_store.clone())?;
+    let client = PanClient::new(credentials.clone(), token_store.clone())?;
     let progress = (!json_mode).then(|| transfer_progress_bar("upload", prepared.size));
     let callback_progress = progress.clone();
     let callback_store = upload_store.clone();
@@ -495,7 +535,7 @@ async fn run_upload(
             Err(baidupan_cli::Error::Api(format!(
                 "upload {} -> {} failed: {}",
                 local.display(),
-                remote,
+                session_remote,
                 error
             )))
         }
@@ -507,17 +547,19 @@ async fn run_download(
     local: &std::path::Path,
     decrypt: bool,
     force: bool,
+    credentials: &AppCredentials,
     token_store: &TokenStore,
     json_mode: bool,
 ) -> Result<baidupan_cli::api::DownloadSummary> {
+    let remote_path = resolve_remote_path(credentials, remote)?;
     let plan = TransferPlanner::new()?;
-    let prepared = plan.prepare_download(remote, local, decrypt, force)?;
-    let client = PanClient::new(AppCredentials::from_env()?, token_store.clone())?;
+    let prepared = plan.prepare_download(&remote_path, local, decrypt, force)?;
+    let client = PanClient::new(credentials.clone(), token_store.clone())?;
     let progress = (!json_mode).then(|| transfer_progress_bar("download", 0));
     let callback_progress = progress.clone();
     let mut result = match client
         .download_file(
-            remote,
+            &remote_path,
             &prepared.temp_path,
             prepared.resume_from,
             move |current, total| {
@@ -535,7 +577,7 @@ async fn run_download(
             }
             return Err(baidupan_cli::Error::Api(format!(
                 "download {} -> {} failed: {}",
-                remote,
+                remote_path,
                 local.display(),
                 error
             )));
@@ -553,17 +595,34 @@ async fn run_download(
     Ok(result)
 }
 
-fn normalize_remote_for_session(path: &str) -> String {
+fn resolve_remote_path(credentials: &AppCredentials, path: &str) -> Result<String> {
     let trimmed = path.trim();
-    if trimmed.is_empty() || trimmed == "/" {
-        return "/".to_string();
+    if trimmed.is_empty() {
+        return Err(Error::InvalidRemotePath(path.to_string()));
     }
 
-    if trimmed.starts_with('/') {
-        trimmed.to_string()
-    } else {
-        format!("/{trimmed}")
+    let app_root = credentials.app_root();
+    if trimmed == "/" {
+        return Ok(app_root);
     }
+
+    if trimmed.starts_with("/apps/") {
+        return Err(Error::InvalidRemotePath(format!(
+            "{path} (do not include the /apps/<app_name> prefix; commands are scoped to {})",
+            credentials.app_root()
+        )));
+    }
+
+    let relative = trimmed.trim_start_matches('/');
+    let explicit_app_prefix = format!("apps/{}", credentials.app_name);
+    if relative == explicit_app_prefix || relative.starts_with(&format!("{explicit_app_prefix}/")) {
+        return Err(Error::InvalidRemotePath(format!(
+            "{path} (do not include the /apps/<app_name> prefix; commands are scoped to {})",
+            credentials.app_root()
+        )));
+    }
+
+    Ok(format!("{}/{}", credentials.app_root(), relative))
 }
 
 fn init_tracing(verbose: u8) {
@@ -600,4 +659,47 @@ fn update_transfer_progress(progress: &ProgressBar, current: u64, total: u64) {
         progress.set_length(total);
     }
     progress.set_position(current.min(total));
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn credentials() -> AppCredentials {
+        AppCredentials {
+            app_key: "key".to_string(),
+            app_secret: "secret".to_string(),
+            app_name: "demo-app".to_string(),
+        }
+    }
+
+    #[test]
+    fn resolves_root_to_app_root() {
+        assert_eq!(
+            resolve_remote_path(&credentials(), "/").expect("root"),
+            "/apps/demo-app"
+        );
+    }
+
+    #[test]
+    fn resolves_relative_paths_inside_app_root() {
+        assert_eq!(
+            resolve_remote_path(&credentials(), "docs/file.txt").expect("relative"),
+            "/apps/demo-app/docs/file.txt"
+        );
+        assert_eq!(
+            resolve_remote_path(&credentials(), "/docs/file.txt").expect("leading slash"),
+            "/apps/demo-app/docs/file.txt"
+        );
+    }
+
+    #[test]
+    fn rejects_explicit_apps_prefix() {
+        let error = resolve_remote_path(&credentials(), "/apps/demo-app/docs/file.txt")
+            .expect_err("should reject full path");
+
+        assert!(error
+            .to_string()
+            .contains("do not include the /apps/<app_name> prefix"));
+    }
 }

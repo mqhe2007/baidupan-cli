@@ -10,6 +10,7 @@ use crate::error::{Error, IoContext, Result};
 
 pub const APP_KEY_ENV: &str = "BAIDUPAN_APP_KEY";
 pub const APP_SECRET_ENV: &str = "BAIDUPAN_APP_SECRET";
+pub const APP_NAME_ENV: &str = "BAIDUPAN_APP_NAME";
 pub const CRYPTO_PASSPHRASE_ENV: &str = "BAIDUPAN_CRYPTO_PASSPHRASE";
 pub const USER_AGENT: &str = "pan.baidu.com";
 
@@ -17,21 +18,37 @@ pub const USER_AGENT: &str = "pan.baidu.com";
 pub struct AppCredentials {
     pub app_key: String,
     pub app_secret: String,
+    pub app_name: String,
 }
 
 impl AppCredentials {
     pub fn from_env() -> Result<Self> {
         let app_key = env::var(APP_KEY_ENV).map_err(|_| Error::MissingEnv(APP_KEY_ENV))?;
         let app_secret = env::var(APP_SECRET_ENV).map_err(|_| Error::MissingEnv(APP_SECRET_ENV))?;
+        let app_name = env::var(APP_NAME_ENV).map_err(|_| Error::MissingEnv(APP_NAME_ENV))?;
+        let app_name = app_name.trim();
+        if app_name.is_empty() {
+            return Err(Error::MissingEnv(APP_NAME_ENV));
+        }
+        if app_name.contains('/') {
+            return Err(Error::InvalidConfig(format!(
+                "{APP_NAME_ENV} must be the application name only, without path separators"
+            )));
+        }
 
         Ok(Self {
             app_key,
             app_secret,
+            app_name: app_name.to_string(),
         })
     }
 
     pub fn masked_app_key(&self) -> String {
         mask_secret(&self.app_key)
+    }
+
+    pub fn app_root(&self) -> String {
+        format!("/apps/{}", self.app_name)
     }
 }
 
@@ -170,5 +187,16 @@ mod tests {
 
         assert!(token.is_expired(45));
         assert!(!token.is_expired(1));
+    }
+
+    #[test]
+    fn computes_app_root() {
+        let credentials = AppCredentials {
+            app_key: "key".to_string(),
+            app_secret: "secret".to_string(),
+            app_name: "demo-app".to_string(),
+        };
+
+        assert_eq!(credentials.app_root(), "/apps/demo-app");
     }
 }

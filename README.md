@@ -22,12 +22,13 @@
 ## 环境要求
 
 - Rust stable
-- 百度网盘开放平台应用 `AppKey` 和 `SecretKey`
+- 百度网盘开放平台应用 `AppKey`、`SecretKey` 和应用目录名
 
 ## 环境变量
 
 - `BAIDUPAN_APP_KEY`: 百度开放平台 AppKey
 - `BAIDUPAN_APP_SECRET`: 百度开放平台 SecretKey
+- `BAIDUPAN_APP_NAME`: 百度开放平台申请接入时填写的产品名称。CLI 会自动把所有远端路径映射到 `/apps/<应用名>/...`
 - `BAIDUPAN_CRYPTO_PASSPHRASE`: 可选。上传加密或下载解密时优先读取；未设置时会在终端交互输入
 
 ## 构建
@@ -41,6 +42,7 @@ cargo build
 ```bash
 export BAIDUPAN_APP_KEY=your_app_key
 export BAIDUPAN_APP_SECRET=your_app_secret
+export BAIDUPAN_APP_NAME=your_product_name
 
 cargo run -- login
 ```
@@ -58,10 +60,10 @@ cargo run -- login
 ```bash
 cargo run -- whoami
 cargo run -- ls /
-cargo run -- mkdir /apps/demo
-cargo run -- rm /apps/demo/file.txt
-cargo run -- mv /apps/demo/a.txt /apps/demo/b.txt
-cargo run -- cp /apps/demo/b.txt /apps/demo/c.txt
+cargo run -- mkdir demo
+cargo run -- rm demo/file.txt
+cargo run -- mv demo/a.txt demo/b.txt
+cargo run -- cp demo/b.txt demo/c.txt
 ```
 
 `ls` 支持 `--json` 输出：
@@ -75,13 +77,15 @@ cargo run -- --json ls /
 上传使用百度网盘的 `precreate -> superfile2 -> create` 链路；下载通过 `filemetas` 获取 `dlink` 后流式写入本地文件。
 
 ```bash
-cargo run -- upload ./local.txt /apps/demo/local.txt --encrypt
-cargo run -- download /apps/demo/local.txt ./local.txt --decrypt
-cargo run -- download /apps/demo/local.txt ./local.txt --force
+cargo run -- upload ./local.txt demo/local.txt --encrypt
+cargo run -- download demo/local.txt ./local.txt --decrypt
+cargo run -- download demo/local.txt ./local.txt --force
 ```
 
 说明：
 
+- 远端路径参数都是相对于应用目录的路径；`/` 表示当前应用的根目录，也就是 `/apps/$BAIDUPAN_APP_NAME`。
+- 命令行里不要手动写 `/apps/<应用名>/` 这一段，CLI 会自动补齐。
 - `--encrypt` 会先在本地加密，再把密文上传到网盘。
 - `--decrypt` 适用于下载由本客户端加密上传的文件。
 - `download` 默认不会覆盖已存在的目标文件，覆盖时使用 `--force`。
@@ -108,17 +112,17 @@ cargo run -- --json batch ./tasks.json
 [
 	{
 		"type": "mkdir",
-		"path": "/apps/demo"
+		"path": "demo"
 	},
 	{
 		"type": "upload",
 		"local": "./local.txt",
-		"remote": "/apps/demo/local.txt",
+		"remote": "demo/local.txt",
 		"encrypt": true
 	},
 	{
 		"type": "download",
-		"remote": "/apps/demo/local.txt",
+		"remote": "demo/local.txt",
 		"local": "./downloads/local.txt",
 		"decrypt": true,
 		"force": true
@@ -129,6 +133,7 @@ cargo run -- --json batch ./tasks.json
 说明：
 
 - 默认遇到首个失败任务即停止；加 `--continue-on-error` 后会继续执行后续任务，并在最后汇总失败项。
+- 清单里的远端 `path`、`from`、`to`、`remote` 字段也都是相对于应用目录的路径。
 - `upload` 与 `download` 在批量模式下仍保留当前的续传、加解密和进度展示行为。
 - `--json` 会输出整批任务的执行汇总，适合脚本调用。
 
