@@ -175,6 +175,7 @@ impl PanClient {
             .form(&[
                 ("path", normalize_remote_path(path)?),
                 ("isdir", "1".to_string()),
+                ("rtype", "0".to_string()),
                 ("size", "0".to_string()),
                 ("block_list", "[]".to_string()),
             ])
