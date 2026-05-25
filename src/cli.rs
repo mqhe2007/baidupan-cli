@@ -69,4 +69,12 @@ pub enum Commands {
         #[arg(long, short, help = "Overwrite the local destination if it exists")]
         force: bool,
     },
+
+    #[command(about = "Run a batch of tasks from a JSON manifest")]
+    Batch {
+        file: PathBuf,
+
+        #[arg(long, help = "Keep running remaining tasks after an error")]
+        continue_on_error: bool,
+    },
 }

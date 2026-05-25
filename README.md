@@ -17,10 +17,7 @@
 - 上传与下载失败时的上下文错误提示
 - 上传断点续传
 - 下载断点续传
-
-当前仍在开发：
-
-- 批量任务
+- 批量任务（JSON 清单顺序执行）
 
 ## 环境要求
 
@@ -94,6 +91,46 @@ cargo run -- download /apps/demo/local.txt ./local.txt --force
 - 下载中断后，重新执行同一条 `download` 命令会从本地 `.目标文件名.baidupan.part` 继续续传。
 - 下载续传会同时维护 `.目标文件名.baidupan.resume.json` 侧边状态文件；下载成功后会自动清理。
 - 当前上传默认不覆盖远端同名文件；若远端已存在，同名冲突将由接口返回错误。
+
+## 批量任务
+
+`batch` 子命令读取一个 JSON 清单，按顺序执行当前已支持的任务类型：`mkdir`、`rm`、`mv`、`cp`、`upload`、`download`。
+
+```bash
+cargo run -- batch ./tasks.json
+cargo run -- batch ./tasks.json --continue-on-error
+cargo run -- --json batch ./tasks.json
+```
+
+清单既可以是任务数组，也可以是带 `tasks` 字段的对象。示例：
+
+```json
+[
+	{
+		"type": "mkdir",
+		"path": "/apps/demo"
+	},
+	{
+		"type": "upload",
+		"local": "./local.txt",
+		"remote": "/apps/demo/local.txt",
+		"encrypt": true
+	},
+	{
+		"type": "download",
+		"remote": "/apps/demo/local.txt",
+		"local": "./downloads/local.txt",
+		"decrypt": true,
+		"force": true
+	}
+]
+```
+
+说明：
+
+- 默认遇到首个失败任务即停止；加 `--continue-on-error` 后会继续执行后续任务，并在最后汇总失败项。
+- `upload` 与 `download` 在批量模式下仍保留当前的续传、加解密和进度展示行为。
+- `--json` 会输出整批任务的执行汇总，适合脚本调用。
 
 ## 测试
 

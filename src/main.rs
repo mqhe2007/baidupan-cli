@@ -1,5 +1,6 @@
 use baidupan_cli::api::{PanClient, UploadRequest};
 use baidupan_cli::auth::OAuthClient;
+use baidupan_cli::batch::{load_batch_tasks, BatchReport, BatchTask, BatchTaskResult};
 use baidupan_cli::cli::{BaidupanCli, Commands};
 use baidupan_cli::config::{AppCredentials, TokenStore};
 use baidupan_cli::transfer::{TransferPlanner, UploadResumeState, UploadStateStore};
@@ -251,9 +252,305 @@ async fn run() -> Result<()> {
                 }
             }
         }
+        Commands::Batch {
+            file,
+            continue_on_error,
+        } => {
+            let tasks = load_batch_tasks(&file)?;
+            let report = run_batch_tasks(&tasks, &token_store, cli.json, continue_on_error).await?;
+
+            if cli.json {
+                println!("{}", serde_json::to_string_pretty(&report)?);
+            } else {
+                println!(
+                    "batch complete: {} succeeded, {} failed, {} total",
+                    report.succeeded, report.failed, report.total
+                );
+            }
+
+            if report.failed > 0 {
+                return Err(baidupan_cli::Error::Api(format!(
+                    "batch completed with {} failure(s)",
+                    report.failed
+                )));
+            }
+        }
     }
 
     Ok(())
+}
+
+async fn run_batch_tasks(
+    tasks: &[BatchTask],
+    token_store: &TokenStore,
+    json_mode: bool,
+    continue_on_error: bool,
+) -> Result<BatchReport> {
+    let mut results = Vec::with_capacity(tasks.len());
+
+    for (index, task) in tasks.iter().enumerate() {
+        let task_result = execute_batch_task(task, token_store, json_mode).await;
+
+        match task_result {
+            Ok(output) => {
+                if !json_mode {
+                    println!(
+                        "[{}/{}] ok: {}",
+                        index + 1,
+                        tasks.len(),
+                        describe_batch_task(task)
+                    );
+                }
+                results.push(BatchTaskResult {
+                    task: task.clone(),
+                    ok: true,
+                    output: Some(output),
+                    error: None,
+                });
+            }
+            Err(error) => {
+                if !json_mode {
+                    eprintln!(
+                        "[{}/{}] failed: {}: {}",
+                        index + 1,
+                        tasks.len(),
+                        describe_batch_task(task),
+                        error
+                    );
+                }
+                results.push(BatchTaskResult {
+                    task: task.clone(),
+                    ok: false,
+                    output: None,
+                    error: Some(error.to_string()),
+                });
+                if !continue_on_error {
+                    break;
+                }
+            }
+        }
+    }
+
+    let succeeded = results.iter().filter(|result| result.ok).count();
+    let failed = results.len().saturating_sub(succeeded);
+
+    Ok(BatchReport {
+        total: tasks.len(),
+        succeeded,
+        failed,
+        results,
+    })
+}
+
+async fn execute_batch_task(
+    task: &BatchTask,
+    token_store: &TokenStore,
+    json_mode: bool,
+) -> Result<serde_json::Value> {
+    match task {
+        BatchTask::Mkdir { path } => {
+            let client = PanClient::new(AppCredentials::from_env()?, token_store.clone())?;
+            client.mkdir(path).await?;
+            Ok(serde_json::json!({"path": path}))
+        }
+        BatchTask::Rm { path } => {
+            let client = PanClient::new(AppCredentials::from_env()?, token_store.clone())?;
+            client.delete(path).await?;
+            Ok(serde_json::json!({"path": path}))
+        }
+        BatchTask::Mv { from, to } => {
+            let client = PanClient::new(AppCredentials::from_env()?, token_store.clone())?;
+            client.move_path(from, to).await?;
+            Ok(serde_json::json!({"from": from, "to": to}))
+        }
+        BatchTask::Cp { from, to } => {
+            let client = PanClient::new(AppCredentials::from_env()?, token_store.clone())?;
+            client.copy_path(from, to).await?;
+            Ok(serde_json::json!({"from": from, "to": to}))
+        }
+        BatchTask::Upload {
+            local,
+            remote,
+            encrypt,
+        } => {
+            let summary = run_upload(local, remote, *encrypt, token_store, json_mode).await?;
+            Ok(serde_json::to_value(summary)?)
+        }
+        BatchTask::Download {
+            remote,
+            local,
+            decrypt,
+            force,
+        } => {
+            let summary =
+                run_download(remote, local, *decrypt, *force, token_store, json_mode).await?;
+            Ok(serde_json::to_value(summary)?)
+        }
+    }
+}
+
+fn describe_batch_task(task: &BatchTask) -> String {
+    match task {
+        BatchTask::Mkdir { path } => format!("mkdir {}", path),
+        BatchTask::Rm { path } => format!("rm {}", path),
+        BatchTask::Mv { from, to } => format!("mv {} -> {}", from, to),
+        BatchTask::Cp { from, to } => format!("cp {} -> {}", from, to),
+        BatchTask::Upload { local, remote, .. } => {
+            format!("upload {} -> {}", local.display(), remote)
+        }
+        BatchTask::Download { remote, local, .. } => {
+            format!("download {} -> {}", remote, local.display())
+        }
+    }
+}
+
+async fn run_upload(
+    local: &std::path::Path,
+    remote: &str,
+    encrypt: bool,
+    token_store: &TokenStore,
+    json_mode: bool,
+) -> Result<baidupan_cli::api::UploadSummary> {
+    let plan = TransferPlanner::new()?;
+    let upload_store = UploadStateStore::for_current_user()?;
+    let session_remote = normalize_remote_for_session(remote);
+    let session_key = upload_store.session_key(local, &session_remote, encrypt)?;
+    let cache_path = encrypt.then(|| upload_store.cache_path(&session_key));
+    let prepared = plan.prepare_upload_with_cache(local, encrypt, cache_path.as_deref())?;
+    let block_list = plan.block_list(&prepared.materialized)?;
+    let resume_state = upload_store.load(&session_key)?;
+    let resume_uploadid = resume_state
+        .as_ref()
+        .filter(|state| {
+            state.is_compatible(
+                &prepared.source,
+                &session_remote,
+                &prepared.materialized,
+                prepared.size,
+                prepared.encrypted,
+                &block_list,
+            )
+        })
+        .map(|state| state.uploadid.as_str());
+    let client = PanClient::new(AppCredentials::from_env()?, token_store.clone())?;
+    let progress = (!json_mode).then(|| transfer_progress_bar("upload", prepared.size));
+    let callback_progress = progress.clone();
+    let callback_store = upload_store.clone();
+    let callback_session_key = session_key.clone();
+    let callback_source = prepared.source.clone();
+    let callback_remote = session_remote.clone();
+    let callback_materialized = prepared.materialized.clone();
+    let callback_size = prepared.size;
+    let callback_encrypted = prepared.encrypted;
+    let callback_block_list = block_list.clone();
+    let result = client
+        .upload_file(
+            UploadRequest {
+                local_path: &prepared.materialized,
+                remote_path: &session_remote,
+                size: prepared.size,
+                block_list: &block_list,
+                encrypted: prepared.encrypted,
+                resume_uploadid,
+            },
+            move |uploadid| {
+                let state = UploadResumeState {
+                    session_key: callback_session_key.clone(),
+                    source_path: callback_source.clone(),
+                    remote_path: callback_remote.clone(),
+                    materialized_path: callback_materialized.clone(),
+                    size: callback_size,
+                    encrypted: callback_encrypted,
+                    block_list: callback_block_list.clone(),
+                    uploadid: uploadid.to_string(),
+                };
+                if let Err(error) = callback_store.save(&state) {
+                    eprintln!("warning: failed to persist upload resume state: {error}");
+                }
+            },
+            move |current, total| {
+                if let Some(progress) = callback_progress.as_ref() {
+                    update_transfer_progress(progress, current, total);
+                }
+            },
+        )
+        .await;
+
+    match result {
+        Ok(result) => {
+            upload_store.cleanup_success(
+                &session_key,
+                &prepared.materialized,
+                prepared.encrypted,
+            )?;
+            if let Some(progress) = progress.as_ref() {
+                progress.finish_with_message("upload complete");
+            }
+            Ok(result)
+        }
+        Err(error) => {
+            if let Some(progress) = progress.as_ref() {
+                progress.abandon_with_message("upload failed");
+            }
+            Err(baidupan_cli::Error::Api(format!(
+                "upload {} -> {} failed: {}",
+                local.display(),
+                remote,
+                error
+            )))
+        }
+    }
+}
+
+async fn run_download(
+    remote: &str,
+    local: &std::path::Path,
+    decrypt: bool,
+    force: bool,
+    token_store: &TokenStore,
+    json_mode: bool,
+) -> Result<baidupan_cli::api::DownloadSummary> {
+    let plan = TransferPlanner::new()?;
+    let prepared = plan.prepare_download(remote, local, decrypt, force)?;
+    let client = PanClient::new(AppCredentials::from_env()?, token_store.clone())?;
+    let progress = (!json_mode).then(|| transfer_progress_bar("download", 0));
+    let callback_progress = progress.clone();
+    let mut result = match client
+        .download_file(
+            remote,
+            &prepared.temp_path,
+            prepared.resume_from,
+            move |current, total| {
+                if let Some(progress) = callback_progress.as_ref() {
+                    update_transfer_progress(progress, current, total);
+                }
+            },
+        )
+        .await
+    {
+        Ok(result) => result,
+        Err(error) => {
+            if let Some(progress) = progress.as_ref() {
+                progress.abandon_with_message("download interrupted; rerun to resume");
+            }
+            return Err(baidupan_cli::Error::Api(format!(
+                "download {} -> {} failed: {}",
+                remote,
+                local.display(),
+                error
+            )));
+        }
+    };
+
+    plan.finalize_download(&prepared, force)?;
+    result.local_path = local.to_path_buf();
+    result.decrypted = decrypt;
+
+    if let Some(progress) = progress.as_ref() {
+        progress.finish_with_message("download complete");
+    }
+
+    Ok(result)
 }
 
 fn normalize_remote_for_session(path: &str) -> String {

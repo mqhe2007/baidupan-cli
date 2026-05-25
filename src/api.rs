@@ -53,12 +53,13 @@ struct ListResponse {
 
 #[derive(Debug, Deserialize)]
 struct FileMetaResponse {
-    list: Vec<FileMetaEntry>,
+    info: Vec<FileMetaEntry>,
 }
 
 #[derive(Debug, Deserialize)]
 struct FileMetaEntry {
     path: String,
+    #[serde(deserialize_with = "deserialize_i32_like")]
     isdir: i32,
     size: u64,
     dlink: Option<String>,
@@ -546,7 +547,7 @@ impl PanClient {
 
         let metadata: FileMetaResponse = parse_pan_success(response, "filemetas").await?;
         metadata
-            .list
+            .info
             .into_iter()
             .next()
             .ok_or_else(|| Error::Api(format!("no metadata returned for {}", remote_path)))
@@ -745,6 +746,23 @@ fn pick_https_upload_host(payload: &LocateUploadResponse) -> Option<&str> {
         .find(|server| server.starts_with("https://"))
 }
 
+fn deserialize_i32_like<'de, D>(deserializer: D) -> std::result::Result<i32, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    #[derive(Deserialize)]
+    #[serde(untagged)]
+    enum IntLike {
+        Int(i32),
+        Text(String),
+    }
+
+    match IntLike::deserialize(deserializer)? {
+        IntLike::Int(value) => Ok(value),
+        IntLike::Text(value) => value.parse::<i32>().map_err(serde::de::Error::custom),
+    }
+}
+
 fn normalize_remote_path(path: &str) -> Result<String> {
     let trimmed = path.trim();
     if trimmed.is_empty() {
@@ -904,6 +922,30 @@ mod tests {
             download_payload_error(reqwest::StatusCode::FORBIDDEN, r#"{"error_code":31326}"#);
 
         assert!(error.to_string().contains("User-Agent: pan.baidu.com"));
+    }
+
+    #[test]
+    fn parses_filemetas_info_payload() {
+        let payload = json!({
+            "errno": 0,
+            "info": [
+                {
+                    "path": "/apps/demo/a.txt",
+                    "isdir": "0",
+                    "size": 17,
+                    "dlink": "https://example.com/file"
+                }
+            ]
+        });
+
+        let parsed: FileMetaResponse = serde_json::from_value(payload).expect("parse filemetas");
+
+        assert_eq!(parsed.info.len(), 1);
+        assert_eq!(parsed.info[0].path, "/apps/demo/a.txt");
+        assert_eq!(
+            parsed.info[0].dlink.as_deref(),
+            Some("https://example.com/file")
+        );
     }
 
     #[test]
