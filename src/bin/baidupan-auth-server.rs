@@ -11,6 +11,7 @@ use baidupan_cli::{Error, Result};
 use serde::Deserialize;
 
 const AUTH_SERVER_BIND_ENV: &str = "BAIDUPAN_AUTH_SERVER_BIND";
+const DEFAULT_AUTH_SERVER_BIND: &str = "127.0.0.1:28681";
 
 #[derive(Clone)]
 struct AppState {
@@ -48,7 +49,8 @@ async fn run() -> Result<()> {
 
     let credentials = AppCredentials::from_direct_env()?;
     let oauth = DirectOAuthClient::new()?;
-    let bind = std::env::var(AUTH_SERVER_BIND_ENV).unwrap_or_else(|_| "127.0.0.1:8080".to_string());
+    let bind = std::env::var(AUTH_SERVER_BIND_ENV)
+        .unwrap_or_else(|_| DEFAULT_AUTH_SERVER_BIND.to_string());
     let address: SocketAddr = bind.parse().map_err(|error| {
         Error::InvalidConfig(format!("invalid {AUTH_SERVER_BIND_ENV}: {error}"))
     })?;

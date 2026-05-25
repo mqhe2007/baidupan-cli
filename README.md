@@ -90,7 +90,7 @@ cargo build --release --bin baidupan-auth-server
 export BAIDUPAN_APP_KEY=your_app_key
 export BAIDUPAN_APP_SECRET=your_app_secret
 export BAIDUPAN_APP_NAME=your_product_name
-export BAIDUPAN_AUTH_SERVER_BIND=0.0.0.0:8080
+export BAIDUPAN_AUTH_SERVER_BIND=0.0.0.0:28681
 
 ./target/release/baidupan-auth-server
 ```
@@ -101,7 +101,7 @@ CLI 指向它：
 
 ```bash
 export BAIDUPAN_APP_NAME=your_product_name
-export BAIDUPAN_AUTH_SERVER=http://your-server:8080
+export BAIDUPAN_AUTH_SERVER=http://your-server:28681
 
 ./target/release/baidupan-cli login
 ```
