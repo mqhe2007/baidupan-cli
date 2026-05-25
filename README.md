@@ -205,7 +205,7 @@ cargo clippy --all-targets -- -D warnings
 仓库已配置 GitHub Actions：
 
 - `ci`: 在 `main` 分支推送和 Pull Request 上执行 `cargo fmt --check && cargo test && cargo clippy --all-targets -- -D warnings`
-- `release-client`: 在推送 `v*` tag 时，只构建并发布客户端二进制 `baidupan-cli`
+- `release-client`: 在推送 `v*` tag 时，构建并发布客户端二进制 `baidupan-cli`，覆盖 Linux x86_64、Linux ARM64、Windows x86_64、macOS x86_64、macOS ARM64
 
 发布客户端：
 
@@ -220,6 +220,21 @@ git push origin v0.1.0
 - 认证后端二进制仍由你自己单独构建和部署
 - `release-client` workflow 会把仓库的 `BAIDUPAN_APP_NAME`、`BAIDUPAN_AUTH_SERVER`、`BAIDUPAN_CRYPTO_PASSPHRASE` Repository secrets 作为客户端的编译期默认值注入 Release 产物
 - 终端用户直接运行 Release 客户端时，不再需要额外配置上述三个值；如果用户自己设置了同名环境变量，运行时环境变量仍然优先
+
+本地构建一套多平台正式发行包：
+
+```bash
+scripts/release-client-local.sh v0.1.0
+```
+
+说明：
+
+- 脚本会在存在 `.env` 时自动读取，并把 `BAIDUPAN_APP_NAME`、`BAIDUPAN_AUTH_SERVER`、`BAIDUPAN_CRYPTO_PASSPHRASE` 映射成客户端的编译期默认值
+- 本地脚本会一起打包 `baidupan-cli` 和 `baidupan-auth-server`，适合开发者或你自己的业务交付场景
+- 本地多平台构建默认覆盖：Linux x86_64、Linux ARM64、Windows x86_64、macOS x86_64、macOS ARM64
+- 需要预先安装 `zig` 和 `cargo-zigbuild`，脚本会自动执行 `rustup target add`
+- 产物默认输出到 `dist/<版本>/`，打包文件名为 `baidupan-toolkit-<版本>-<平台>.tar.gz|zip`
+- 本地打包时 `BAIDUPAN_AUTH_SERVER` 是可选项；如果未提供，打出来的客户端只是没有内置认证后端默认地址
 
 ## 说明
 
