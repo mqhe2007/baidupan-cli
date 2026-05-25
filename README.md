@@ -23,12 +23,14 @@
 
 - Rust stable
 - 百度网盘开放平台应用 `AppKey`、`SecretKey` 和应用目录名
+- 面向终端用户发布时，建议额外部署一个认证后端二进制，由它代持 `AppKey/SecretKey`
 
 ## 环境变量
 
-- `BAIDUPAN_APP_KEY`: 百度开放平台 AppKey
-- `BAIDUPAN_APP_SECRET`: 百度开放平台 SecretKey
+- `BAIDUPAN_APP_KEY`: 百度开放平台 AppKey。开发或直连认证模式需要
+- `BAIDUPAN_APP_SECRET`: 百度开放平台 SecretKey。开发或直连认证模式需要
 - `BAIDUPAN_APP_NAME`: 百度开放平台申请接入时填写的产品名称。CLI 会自动把所有远端路径映射到 `/apps/<应用名>/...`
+- `BAIDUPAN_AUTH_SERVER`: 可选。认证后端地址，例如 `https://auth.example.com`。设置后，CLI 的登录和 token 刷新会走你的后端，不再要求终端用户本地提供 `BAIDUPAN_APP_SECRET`
 - `BAIDUPAN_CRYPTO_PASSPHRASE`: 可选。上传加密或下载解密时优先读取；未设置时会在终端交互输入
 
 ## 构建
@@ -39,10 +41,21 @@ cargo build
 
 ## 登录
 
+开发或本地直连百度 OAuth：
+
 ```bash
 export BAIDUPAN_APP_KEY=your_app_key
 export BAIDUPAN_APP_SECRET=your_app_secret
 export BAIDUPAN_APP_NAME=your_product_name
+
+cargo run -- login
+```
+
+发布给终端用户时，推荐改成：
+
+```bash
+export BAIDUPAN_APP_NAME=your_product_name
+export BAIDUPAN_AUTH_SERVER=https://auth.example.com
 
 cargo run -- login
 ```
@@ -54,6 +67,48 @@ cargo run -- login
 - 二维码地址 `qrcode_url`
 
 授权完成后，token 会保存在系统配置目录下的 `baidupan-cli/tokens.json`。
+
+## 认证后端
+
+仓库同时提供一个认证后端二进制：`baidupan-auth-server`。它只负责三件事：
+
+- 申请设备码
+- 轮询设备码换取 token
+- 使用 refresh token 刷新 access token
+
+它不代理上传、下载或目录操作，所以不会承载文件流量。
+
+构建：
+
+```bash
+cargo build --release --bin baidupan-auth-server
+```
+
+运行：
+
+```bash
+export BAIDUPAN_APP_KEY=your_app_key
+export BAIDUPAN_APP_SECRET=your_app_secret
+export BAIDUPAN_APP_NAME=your_product_name
+export BAIDUPAN_AUTH_SERVER_BIND=0.0.0.0:8080
+
+./target/release/baidupan-auth-server
+```
+
+CLI 指向它：
+
+```bash
+export BAIDUPAN_APP_NAME=your_product_name
+export BAIDUPAN_AUTH_SERVER=http://your-server:8080
+
+./target/release/baidupan-cli login
+```
+
+说明：
+
+- 认证后端必须部署在你控制的机器上，不要随 CLI 一起分发给终端用户。
+- 终端用户侧不再需要 `BAIDUPAN_APP_SECRET`。
+- 认证后端当前只转发 OAuth 相关能力，现有文件上传下载仍由 CLI 直接调用百度网盘开放平台。
 
 ## 目录与文件命令
 

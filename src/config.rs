@@ -11,21 +11,39 @@ use crate::error::{Error, IoContext, Result};
 pub const APP_KEY_ENV: &str = "BAIDUPAN_APP_KEY";
 pub const APP_SECRET_ENV: &str = "BAIDUPAN_APP_SECRET";
 pub const APP_NAME_ENV: &str = "BAIDUPAN_APP_NAME";
+pub const AUTH_SERVER_ENV: &str = "BAIDUPAN_AUTH_SERVER";
 pub const CRYPTO_PASSPHRASE_ENV: &str = "BAIDUPAN_CRYPTO_PASSPHRASE";
 pub const USER_AGENT: &str = "pan.baidu.com";
 
 #[derive(Debug, Clone)]
 pub struct AppCredentials {
-    pub app_key: String,
-    pub app_secret: String,
+    pub app_key: Option<String>,
+    pub app_secret: Option<String>,
     pub app_name: String,
+    pub auth_server: Option<String>,
 }
 
 impl AppCredentials {
     pub fn from_env() -> Result<Self> {
-        let app_key = env::var(APP_KEY_ENV).map_err(|_| Error::MissingEnv(APP_KEY_ENV))?;
-        let app_secret = env::var(APP_SECRET_ENV).map_err(|_| Error::MissingEnv(APP_SECRET_ENV))?;
+        Self::from_env_with_mode(true)
+    }
+
+    pub fn from_direct_env() -> Result<Self> {
+        Self::from_env_with_mode(false)
+    }
+
+    fn from_env_with_mode(allow_auth_server: bool) -> Result<Self> {
+        let app_key = env::var(APP_KEY_ENV).ok().and_then(normalize_env_value);
+        let app_secret = env::var(APP_SECRET_ENV).ok().and_then(normalize_env_value);
         let app_name = env::var(APP_NAME_ENV).map_err(|_| Error::MissingEnv(APP_NAME_ENV))?;
+        let auth_server = if allow_auth_server {
+            env::var(AUTH_SERVER_ENV)
+                .ok()
+                .and_then(normalize_env_value)
+                .map(|url| url.trim_end_matches('/').to_string())
+        } else {
+            None
+        };
         let app_name = app_name.trim();
         if app_name.is_empty() {
             return Err(Error::MissingEnv(APP_NAME_ENV));
@@ -35,20 +53,43 @@ impl AppCredentials {
                 "{APP_NAME_ENV} must be the application name only, without path separators"
             )));
         }
+        if auth_server.is_none() && app_key.is_none() {
+            return Err(Error::MissingEnv(APP_KEY_ENV));
+        }
+        if auth_server.is_none() && app_secret.is_none() {
+            return Err(Error::MissingEnv(APP_SECRET_ENV));
+        }
 
         Ok(Self {
             app_key,
             app_secret,
             app_name: app_name.to_string(),
+            auth_server,
         })
     }
 
-    pub fn masked_app_key(&self) -> String {
-        mask_secret(&self.app_key)
+    pub fn masked_app_key(&self) -> Option<String> {
+        self.app_key.as_deref().map(mask_secret)
     }
 
     pub fn app_root(&self) -> String {
         format!("/apps/{}", self.app_name)
+    }
+
+    pub fn auth_server_url(&self) -> Option<&str> {
+        self.auth_server.as_deref()
+    }
+
+    pub fn oauth_client_id(&self) -> Result<&str> {
+        self.app_key
+            .as_deref()
+            .ok_or(Error::MissingEnv(APP_KEY_ENV))
+    }
+
+    pub fn oauth_client_secret(&self) -> Result<&str> {
+        self.app_secret
+            .as_deref()
+            .ok_or(Error::MissingEnv(APP_SECRET_ENV))
     }
 }
 
@@ -147,9 +188,25 @@ fn mask_secret(value: &str) -> String {
     format!("{head}...{tail}")
 }
 
+fn normalize_env_value(value: String) -> Option<String> {
+    let trimmed = value.trim();
+    if trimmed.is_empty() {
+        None
+    } else {
+        Some(trimmed.to_string())
+    }
+}
+
 #[cfg(test)]
 mod tests {
+    use std::sync::{Mutex, OnceLock};
+
     use super::*;
+
+    fn env_lock() -> &'static Mutex<()> {
+        static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+        LOCK.get_or_init(|| Mutex::new(()))
+    }
 
     #[test]
     fn masks_short_values() {
@@ -192,11 +249,50 @@ mod tests {
     #[test]
     fn computes_app_root() {
         let credentials = AppCredentials {
-            app_key: "key".to_string(),
-            app_secret: "secret".to_string(),
+            app_key: Some("key".to_string()),
+            app_secret: Some("secret".to_string()),
             app_name: "demo-app".to_string(),
+            auth_server: None,
         };
 
         assert_eq!(credentials.app_root(), "/apps/demo-app");
+    }
+
+    #[test]
+    fn masks_optional_app_key() {
+        let credentials = AppCredentials {
+            app_key: None,
+            app_secret: None,
+            app_name: "demo-app".to_string(),
+            auth_server: Some("https://auth.example.com".to_string()),
+        };
+
+        assert_eq!(credentials.masked_app_key(), None);
+    }
+
+    #[test]
+    fn auth_server_mode_does_not_require_local_oauth_credentials() {
+        let _guard = env_lock().lock().expect("env lock");
+        std::env::set_var(APP_NAME_ENV, "demo-app");
+        std::env::set_var(AUTH_SERVER_ENV, "https://auth.example.com/");
+        std::env::remove_var(APP_KEY_ENV);
+        std::env::remove_var(APP_SECRET_ENV);
+
+        let credentials = AppCredentials::from_env().expect("auth server mode");
+
+        assert_eq!(
+            credentials.auth_server_url(),
+            Some("https://auth.example.com")
+        );
+        assert_eq!(
+            credentials
+                .oauth_client_id()
+                .expect_err("no local app key")
+                .to_string(),
+            format!("missing environment variable {APP_KEY_ENV}")
+        );
+
+        std::env::remove_var(APP_NAME_ENV);
+        std::env::remove_var(AUTH_SERVER_ENV);
     }
 }

@@ -7,6 +7,7 @@ fn login_requires_app_key() {
     let mut command = Command::cargo_bin("baidupan-cli").expect("binary");
     command
         .arg("login")
+        .env("BAIDUPAN_APP_NAME", "demo-app")
         .env_remove("BAIDUPAN_APP_KEY")
         .env_remove("BAIDUPAN_APP_SECRET")
         .assert()
@@ -52,6 +53,7 @@ fn batch_requires_login() {
         .arg(&manifest)
         .env("HOME", temp_dir.path())
         .env("XDG_CONFIG_HOME", temp_dir.path())
+        .env("BAIDUPAN_APP_NAME", "demo-app")
         .env_remove("BAIDUPAN_APP_KEY")
         .env_remove("BAIDUPAN_APP_SECRET")
         .assert()

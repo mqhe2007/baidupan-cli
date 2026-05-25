@@ -26,10 +26,15 @@ async fn run() -> Result<()> {
     match cli.command {
         Commands::Login => {
             let credentials = AppCredentials::from_env()?;
-            let oauth = OAuthClient::new()?;
+            let oauth = OAuthClient::new(&credentials)?;
             let device_code = oauth.request_device_code(&credentials).await?;
 
-            println!("App key: {}", credentials.masked_app_key());
+            if let Some(app_key) = credentials.masked_app_key() {
+                println!("App key: {app_key}");
+            }
+            if let Some(auth_server) = credentials.auth_server_url() {
+                println!("Auth server: {auth_server}");
+            }
             println!("Open this URL: {}", device_code.verification_url);
             println!("User code: {}", device_code.user_code);
             println!("QR URL: {}", device_code.qrcode_url);
@@ -667,9 +672,10 @@ mod tests {
 
     fn credentials() -> AppCredentials {
         AppCredentials {
-            app_key: "key".to_string(),
-            app_secret: "secret".to_string(),
+            app_key: Some("key".to_string()),
+            app_secret: Some("secret".to_string()),
             app_name: "demo-app".to_string(),
+            auth_server: None,
         }
     }
 
