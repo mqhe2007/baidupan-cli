@@ -1,9 +1,13 @@
 [package]
 name = "baidupan-cli"
-version = "0.2.4"
+version = "0.2.5"
 edition = "2021"
 description = "A terminal Baidu Netdisk client powered by Baidu Pan Open Platform APIs."
-license = "MIT"
+readme = "README.md"
+homepage = "https://mengqinghe.com"
+repository = "https://github.com/mqhe2007/baidupan-cli"
+license = "Apache-2.0"
+
 
 [dependencies]
 aes-gcm = "0.10"

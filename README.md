@@ -2,6 +2,13 @@
 
 基于百度网盘开放平台 API，使用 Rust 编写的百度网盘终端客户端。
 
+## 项目信息
+
+- 作者：孟庆贺
+- 主页：https://mengqinghe.com
+- 仓库：https://github.com/mqhe2007/baidupan-cli
+- 许可证：Apache License 2.0
+
 当前已实现：
 
 - OAuth 设备码登录
