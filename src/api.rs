@@ -20,6 +20,9 @@ const LOCATE_UPLOAD_API: &str = "https://d.pcs.baidu.com/rest/2.0/pcs/file";
 const UPLOAD_APP_ID: &str = "250528";
 const UPLOAD_VERSION: &str = "2.0";
 
+pub const ONDUP_OVERWRITE: &str = "overwrite";
+pub const ONDUP_FAIL: &str = "fail";
+
 #[derive(Debug, Clone)]
 pub struct PanClient {
     http: Client,
@@ -97,6 +100,7 @@ pub struct UploadRequest<'a> {
     pub block_list: &'a [String],
     pub encrypted: bool,
     pub resume_uploadid: Option<&'a str>,
+    pub ondup: &'a str,
 }
 
 struct UploadPartsRequest<'a> {
@@ -216,6 +220,7 @@ impl PanClient {
             ("autoinit".to_string(), "1".to_string()),
             ("rtype".to_string(), "0".to_string()),
             ("block_list".to_string(), block_list_json.clone()),
+            ("ondup".to_string(), request.ondup.to_string()),
         ];
         if let Some(uploadid) = request.resume_uploadid.filter(|value| !value.is_empty()) {
             precreate_form.push(("uploadid".to_string(), uploadid.to_string()));

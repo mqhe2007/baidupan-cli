@@ -1,4 +1,5 @@
 use std::fs;
+use std::io::{BufReader, Read};
 use std::path::{Path, PathBuf};
 use std::time::UNIX_EPOCH;
 
@@ -8,7 +9,7 @@ use serde::{Deserialize, Serialize};
 use tempfile::NamedTempFile;
 
 use crate::config::configured_crypto_passphrase;
-use crate::crypto::{decrypt_bytes, encrypt_bytes};
+use crate::crypto::{decrypt_bytes, decrypt_file_streaming, encrypt_file_streaming};
 use crate::error::{IoContext, Result};
 
 pub const UPLOAD_PART_SIZE: usize = 4 * 1024 * 1024;
@@ -182,7 +183,6 @@ impl TransferPlanner {
         cache_path: Option<&Path>,
     ) -> Result<PreparedUpload> {
         let local = local.to_path_buf();
-        let input = fs::read(&local).at(&local)?;
 
         if encrypt {
             if let Some(cache_path) = cache_path {
@@ -201,8 +201,8 @@ impl TransferPlanner {
                 }
 
                 let passphrase = read_passphrase()?;
-                let payload = encrypt_bytes(&input, &passphrase)?;
-                fs::write(cache_path, payload).at(cache_path)?;
+                encrypt_file_streaming(&local, cache_path, &passphrase)
+                    .map_err(|error| crate::Error::Crypto(error.to_string()))?;
                 let size = fs::metadata(cache_path).at(cache_path)?.len();
                 return Ok(PreparedUpload {
                     source: local,
@@ -213,11 +213,11 @@ impl TransferPlanner {
             }
 
             let passphrase = read_passphrase()?;
-            let payload = encrypt_bytes(&input, &passphrase)?;
             let temp =
                 NamedTempFile::new().map_err(|error| crate::Error::Crypto(error.to_string()))?;
             let temp_path = temp.path().to_path_buf();
-            fs::write(&temp_path, payload).at(&temp_path)?;
+            encrypt_file_streaming(&local, &temp_path, &passphrase)
+                .map_err(|error| crate::Error::Crypto(error.to_string()))?;
             let (_file, persisted) = temp
                 .keep()
                 .map_err(|error| crate::Error::Crypto(error.error.to_string()))?;
@@ -295,20 +295,43 @@ impl TransferPlanner {
         })
     }
 
+    /// Decrypt a downloaded file.  Auto-detects V1 (whole-file) vs V2
+    /// (chunked / streaming) by inspecting the leading MAGIC bytes.
     pub fn decrypt_downloaded_file(&self, source: &Path, destination: &Path) -> Result<()> {
-        let payload = fs::read(source).at(source)?;
         let passphrase = read_passphrase()?;
+
+        // Peek at the magic bytes to route to the right format.
+        let mut file = fs::File::open(source).at(source)?;
+        let mut magic = [0_u8; 8];
+        let is_v2 = file.read_exact(&mut magic).is_ok() && &magic == b"BDPENC2\0";
+        drop(file);
+
+        if is_v2 {
+            return decrypt_file_streaming(source, destination, &passphrase)
+                .map_err(|error| crate::Error::Crypto(error.to_string()));
+        }
+
+        // V1 fallback (existing encrypted files)
+        let payload = fs::read(source).at(source)?;
         let plaintext = decrypt_bytes(&payload, &passphrase)?;
         fs::write(destination, plaintext).at(destination)?;
         Ok(())
     }
 
+    /// Compute the MD5 block-list for upload precreate, reading the file
+    /// in UPLOAD_PART_SIZE chunks so that large files stay bounded.
     pub fn block_list(&self, source: &Path) -> Result<Vec<String>> {
-        let bytes = fs::read(source).at(source)?;
+        let file = fs::File::open(source).at(source)?;
+        let mut reader = BufReader::with_capacity(UPLOAD_PART_SIZE, file);
+        let mut buf = vec![0_u8; UPLOAD_PART_SIZE];
         let mut block_list = Vec::new();
 
-        for chunk in bytes.chunks(UPLOAD_PART_SIZE) {
-            let digest: Digest = md5::compute(chunk);
+        loop {
+            let n = reader.read(&mut buf).at(source)?;
+            if n == 0 {
+                break;
+            }
+            let digest: Digest = md5::compute(&buf[..n]);
             block_list.push(format!("{:x}", digest));
         }
 
@@ -407,7 +430,7 @@ mod tests {
 
         fs::write(
             &encrypted,
-            encrypt_bytes(b"world", "test-pass").expect("encrypt bytes"),
+            crate::crypto::encrypt_bytes(b"world", "test-pass").expect("encrypt bytes"),
         )
         .expect("write encrypted");
 
@@ -417,6 +440,30 @@ mod tests {
             .expect("decrypt");
 
         assert_eq!(fs::read(&output).expect("read output"), b"world");
+        std::env::remove_var(CRYPTO_PASSPHRASE_ENV);
+    }
+
+    #[test]
+    fn decrypts_downloaded_file_v2() {
+        let _guard = env_lock().lock().expect("env lock");
+        let temp_dir = tempfile::tempdir().expect("temp dir");
+        let source = temp_dir.path().join("src.bin");
+        let encrypted = temp_dir.path().join("payload.bin");
+        let output = temp_dir.path().join("plain.txt");
+        std::env::set_var(CRYPTO_PASSPHRASE_ENV, "test-pass");
+
+        fs::write(&source, b"streaming world").expect("write source");
+        encrypt_file_streaming(&source, &encrypted, "test-pass").expect("encrypt v2");
+
+        TransferPlanner::new()
+            .expect("planner")
+            .decrypt_downloaded_file(&encrypted, &output)
+            .expect("decrypt v2");
+
+        assert_eq!(
+            fs::read(&output).expect("read output"),
+            b"streaming world"
+        );
         std::env::remove_var(CRYPTO_PASSPHRASE_ENV);
     }
 
@@ -432,6 +479,22 @@ mod tests {
             .expect("block list");
 
         assert_eq!(blocks, vec!["900150983cd24fb0d6963f7d28e17f72"]);
+    }
+
+    #[test]
+    fn block_list_empty_file() {
+        let temp_dir = tempfile::tempdir().expect("temp dir");
+        let source = temp_dir.path().join("empty.bin");
+        fs::write(&source, b"").expect("write empty");
+
+        let blocks = TransferPlanner::new()
+            .expect("planner")
+            .block_list(&source)
+            .expect("block list");
+
+        // 0-byte file: one block with MD5 of empty input
+        assert_eq!(blocks.len(), 1);
+        assert_eq!(blocks[0], format!("{:x}", md5::compute([])));
     }
 
     #[test]

@@ -111,6 +111,7 @@ async fn run() -> Result<()> {
             local,
             remote,
             encrypt,
+            force,
         } => {
             let credentials = AppCredentials::from_env()?;
             let plan = TransferPlanner::new()?;
@@ -155,6 +156,11 @@ async fn run() -> Result<()> {
                         block_list: &block_list,
                         encrypted: prepared.encrypted,
                         resume_uploadid,
+                        ondup: if force {
+                            baidupan_cli::api::ONDUP_OVERWRITE
+                        } else {
+                            baidupan_cli::api::ONDUP_FAIL
+                        },
                     },
                     move |uploadid| {
                         let state = UploadResumeState {
@@ -400,11 +406,13 @@ async fn execute_batch_task(
             local,
             remote,
             encrypt,
+            force,
         } => {
             let summary = run_upload(
                 local,
                 remote,
                 *encrypt,
+                *force,
                 &credentials,
                 token_store,
                 json_mode,
@@ -452,6 +460,7 @@ async fn run_upload(
     local: &std::path::Path,
     remote: &str,
     encrypt: bool,
+    force: bool,
     credentials: &AppCredentials,
     token_store: &TokenStore,
     json_mode: bool,
@@ -497,6 +506,11 @@ async fn run_upload(
                 block_list: &block_list,
                 encrypted: prepared.encrypted,
                 resume_uploadid,
+                ondup: if force {
+                    baidupan_cli::api::ONDUP_OVERWRITE
+                } else {
+                    baidupan_cli::api::ONDUP_FAIL
+                },
             },
             move |uploadid| {
                 let state = UploadResumeState {

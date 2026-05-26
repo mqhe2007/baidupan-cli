@@ -27,6 +27,8 @@ pub enum BatchTask {
         remote: String,
         #[serde(default)]
         encrypt: bool,
+        #[serde(default)]
+        force: bool,
     },
     Download {
         remote: String,

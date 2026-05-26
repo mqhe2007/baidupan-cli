@@ -56,6 +56,9 @@ pub enum Commands {
 
         #[arg(long, help = "Encrypt locally before uploading")]
         encrypt: bool,
+
+        #[arg(long, short, help = "Overwrite the remote file if it exists")]
+        force: bool,
     },
 
     #[command(about = "Download a remote file")]
