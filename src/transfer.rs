@@ -380,12 +380,12 @@ fn cleanup_if_exists(path: &Path) -> Result<()> {
 }
 
 fn read_passphrase() -> Result<String> {
-    if let Some(passphrase) = configured_crypto_passphrase() {
-        return Ok(passphrase);
-    }
-
-    let prompt = "Encryption passphrase: ";
-    rpassword::prompt_password(prompt).map_err(|error| crate::Error::Crypto(error.to_string()))
+    configured_crypto_passphrase().ok_or_else(|| {
+        crate::Error::Crypto(format!(
+            "encryption/decryption requires {} environment variable",
+            crate::config::CRYPTO_PASSPHRASE_ENV
+        ))
+    })
 }
 
 #[cfg(test)]

@@ -36,7 +36,7 @@
 - `BAIDUPAN_APP_KEY`: 百度开放平台 AppKey。**必填**
 - `BAIDUPAN_APP_SECRET`: 百度开放平台 SecretKey。**必填**
 - `BAIDUPAN_APP_NAME`: 百度开放平台申请接入时填写的产品名称。CLI 会自动把所有远端路径映射到 `/apps/<应用名>/...`。**必填**
-- `BAIDUPAN_CRYPTO_PASSPHRASE`: 可选。上传加密或下载解密时优先读取；未设置时会在终端交互输入
+- `BAIDUPAN_CRYPTO_PASSPHRASE`: 使用 `--encrypt` 或 `--decrypt` 时**必填**。未设置时会报错中断，避免遗忘密码导致数据无法解密
 
 ## 构建
 
