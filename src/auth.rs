@@ -32,39 +32,10 @@ struct TokenResponse {
 
 #[derive(Debug, Clone)]
 pub struct OAuthClient {
-    transport: OAuthTransport,
-}
-
-#[derive(Debug, Clone)]
-enum OAuthTransport {
-    Direct(DirectOAuthClient),
-    Relay(RemoteOAuthClient),
-}
-
-#[derive(Debug, Clone)]
-pub struct DirectOAuthClient {
     http: Client,
 }
 
-#[derive(Debug, Clone)]
-struct RemoteOAuthClient {
-    http: Client,
-    base_url: String,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-struct DeviceCodePollRequest {
-    device_code: String,
-    expires_in: u64,
-    interval: u64,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-struct RefreshTokenRequest {
-    refresh_token: String,
-}
-
-impl DirectOAuthClient {
+impl OAuthClient {
     pub fn new() -> Result<Self> {
         let http = Client::builder().user_agent(USER_AGENT).build()?;
         Ok(Self { http })
@@ -79,7 +50,7 @@ impl DirectOAuthClient {
             .get(format!("{OAUTH_BASE}/device/code"))
             .query(&[
                 ("response_type", "device_code"),
-                ("client_id", credentials.oauth_client_id()?),
+                ("client_id", credentials.oauth_client_id()),
                 ("scope", OAUTH_SCOPE),
             ])
             .send()
@@ -109,8 +80,8 @@ impl DirectOAuthClient {
                 .query(&[
                     ("grant_type", "device_token"),
                     ("code", device_code.device_code.as_str()),
-                    ("client_id", credentials.oauth_client_id()?),
-                    ("client_secret", credentials.oauth_client_secret()?),
+                    ("client_id", credentials.oauth_client_id()),
+                    ("client_secret", credentials.oauth_client_secret()),
                 ])
                 .send()
                 .await?;
@@ -159,106 +130,14 @@ impl DirectOAuthClient {
             .query(&[
                 ("grant_type", "refresh_token"),
                 ("refresh_token", refresh_token),
-                ("client_id", credentials.oauth_client_id()?),
-                ("client_secret", credentials.oauth_client_secret()?),
+                ("client_id", credentials.oauth_client_id()),
+                ("client_secret", credentials.oauth_client_secret()),
             ])
             .send()
             .await?;
 
         let token: TokenResponse = parse_oauth_success(response).await?;
         token.into_stored_token()
-    }
-}
-
-impl OAuthClient {
-    pub fn new(credentials: &AppCredentials) -> Result<Self> {
-        if let Some(base_url) = credentials.auth_server_url() {
-            let http = Client::builder().user_agent(USER_AGENT).build()?;
-            return Ok(Self {
-                transport: OAuthTransport::Relay(RemoteOAuthClient {
-                    http,
-                    base_url: base_url.to_string(),
-                }),
-            });
-        }
-
-        Ok(Self {
-            transport: OAuthTransport::Direct(DirectOAuthClient::new()?),
-        })
-    }
-
-    pub async fn request_device_code(
-        &self,
-        credentials: &AppCredentials,
-    ) -> Result<DeviceCodeResponse> {
-        match &self.transport {
-            OAuthTransport::Direct(client) => client.request_device_code(credentials).await,
-            OAuthTransport::Relay(client) => client.request_device_code().await,
-        }
-    }
-
-    pub async fn poll_for_token(
-        &self,
-        credentials: &AppCredentials,
-        device_code: &DeviceCodeResponse,
-    ) -> Result<StoredToken> {
-        match &self.transport {
-            OAuthTransport::Direct(client) => client.poll_for_token(credentials, device_code).await,
-            OAuthTransport::Relay(client) => client.poll_for_token(device_code).await,
-        }
-    }
-
-    pub async fn refresh_token(
-        &self,
-        credentials: &AppCredentials,
-        refresh_token: &str,
-    ) -> Result<StoredToken> {
-        match &self.transport {
-            OAuthTransport::Direct(client) => {
-                client.refresh_token(credentials, refresh_token).await
-            }
-            OAuthTransport::Relay(client) => client.refresh_token(refresh_token).await,
-        }
-    }
-}
-
-impl RemoteOAuthClient {
-    async fn request_device_code(&self) -> Result<DeviceCodeResponse> {
-        let response = self
-            .http
-            .post(format!("{}/api/v1/oauth/device-code", self.base_url))
-            .send()
-            .await?;
-
-        parse_auth_server_success(response, "request_device_code").await
-    }
-
-    async fn poll_for_token(&self, device_code: &DeviceCodeResponse) -> Result<StoredToken> {
-        let response = self
-            .http
-            .post(format!("{}/api/v1/oauth/poll", self.base_url))
-            .json(&DeviceCodePollRequest {
-                device_code: device_code.device_code.clone(),
-                expires_in: device_code.expires_in,
-                interval: device_code.interval,
-            })
-            .send()
-            .await?;
-
-        parse_auth_server_success(response, "poll_for_token").await
-    }
-
-    async fn refresh_token(&self, refresh_token: &str) -> Result<StoredToken> {
-        let response = self
-            .http
-            .post(format!("{}/api/v1/oauth/refresh", self.base_url))
-            .json(&RefreshTokenRequest {
-                refresh_token: refresh_token.to_string(),
-            })
-            .send()
-            .await?;
-
-        parse_auth_server_success(response, "refresh_token").await
     }
 }
 
@@ -282,22 +161,6 @@ where
         return Err(oauth_value_error(&payload));
     }
     Ok(serde_json::from_value(payload)?)
-}
-
-async fn parse_auth_server_success<T>(response: reqwest::Response, operation: &str) -> Result<T>
-where
-    T: DeserializeOwned,
-{
-    let status = response.status();
-    let body = response.text().await?;
-    if !status.is_success() {
-        return Err(Error::Api(format!(
-            "auth server {operation} failed with status {}: {}",
-            status,
-            body.trim()
-        )));
-    }
-    Ok(serde_json::from_str(&body)?)
 }
 
 fn oauth_value_error(payload: &Value) -> Error {

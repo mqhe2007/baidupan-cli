@@ -9,7 +9,7 @@ usage() {
   cat <<'EOF'
 Usage: scripts/release-client-local.sh [version]
 
-Build and package baidupan-cli and baidupan-auth-server release artifacts for mainstream desktop targets.
+Build and package baidupan-cli release artifacts for mainstream desktop targets.
 
 Targets:
   - x86_64-apple-darwin
@@ -21,10 +21,8 @@ Targets:
 Environment:
   - Reads .env automatically when present
   - Maps BAIDUPAN_APP_KEY, BAIDUPAN_APP_SECRET, BAIDUPAN_APP_NAME,
-    BAIDUPAN_AUTH_SERVER, BAIDUPAN_CRYPTO_PASSPHRASE to compile-time defaults
+    BAIDUPAN_CRYPTO_PASSPHRASE to compile-time defaults
     unless BAIDUPAN_DEFAULT_* is already set
-  - BAIDUPAN_AUTH_SERVER is optional for local toolkit builds; when omitted, the
-    packaged client has no built-in auth server default
 
 Prerequisites for cross-platform builds:
   - rustup target add for the listed targets
@@ -41,7 +39,6 @@ fi
 VERSION="${1:-local}"
 DIST_DIR="$ROOT_DIR/dist/$VERSION"
 CLIENT_BIN="baidupan-cli"
-AUTH_SERVER_BIN="baidupan-auth-server"
 
 if [[ -f "$ROOT_DIR/.env" ]]; then
   set -a
@@ -51,7 +48,6 @@ if [[ -f "$ROOT_DIR/.env" ]]; then
 fi
 
 export BAIDUPAN_DEFAULT_APP_NAME="${BAIDUPAN_DEFAULT_APP_NAME:-${BAIDUPAN_APP_NAME:-}}"
-export BAIDUPAN_DEFAULT_AUTH_SERVER="${BAIDUPAN_DEFAULT_AUTH_SERVER:-${BAIDUPAN_AUTH_SERVER:-}}"
 export BAIDUPAN_DEFAULT_CRYPTO_PASSPHRASE="${BAIDUPAN_DEFAULT_CRYPTO_PASSPHRASE:-${BAIDUPAN_CRYPTO_PASSPHRASE:-}}"
 export BAIDUPAN_DEFAULT_APP_KEY="${BAIDUPAN_DEFAULT_APP_KEY:-${BAIDUPAN_APP_KEY:-}}"
 export BAIDUPAN_DEFAULT_APP_SECRET="${BAIDUPAN_DEFAULT_APP_SECRET:-${BAIDUPAN_APP_SECRET:-}}"
@@ -74,32 +70,30 @@ need_cmd() {
 
 build_native() {
   local target="$1"
-  local bin_name="$2"
-  cargo build --locked --release --bin "$bin_name" --target "$target"
+  cargo build --locked --release --bin "$CLIENT_BIN" --target "$target"
 }
 
 build_cross() {
   local target="$1"
-  local bin_name="$2"
-  cargo zigbuild --locked --release --bin "$bin_name" --target "$target"
+  cargo zigbuild --locked --release --bin "$CLIENT_BIN" --target "$target"
 }
 
 package_unix() {
   local target="$1"
   local label="$2"
-  local asset="$DIST_DIR/baidupan-toolkit-${VERSION}-${label}.tar.gz"
-  tar -czf "$asset" -C "$ROOT_DIR/target/$target/release" "$CLIENT_BIN" "$AUTH_SERVER_BIN"
+  local asset="$DIST_DIR/baidupan-${VERSION}-${label}.tar.gz"
+  tar -czf "$asset" -C "$ROOT_DIR/target/$target/release" "$CLIENT_BIN"
   echo "packaged $asset"
 }
 
 package_windows() {
   local target="$1"
   local label="$2"
-  local asset="$DIST_DIR/baidupan-toolkit-${VERSION}-${label}.zip"
+  local asset="$DIST_DIR/baidupan-${VERSION}-${label}.zip"
   (
     cd "$ROOT_DIR/target/$target/release"
     rm -f "$asset"
-    zip -q "$asset" "${CLIENT_BIN}.exe" "${AUTH_SERVER_BIN}.exe"
+    zip -q "$asset" "${CLIENT_BIN}.exe"
   )
   echo "packaged $asset"
 }
@@ -125,26 +119,21 @@ echo "installing Rust targets..."
 rustup target add "${ALL_TARGETS[@]}"
 
 echo "building macOS targets..."
-build_native x86_64-apple-darwin "$CLIENT_BIN"
-build_native x86_64-apple-darwin "$AUTH_SERVER_BIN"
+build_native x86_64-apple-darwin
 package_unix x86_64-apple-darwin macos-x86_64
 
-build_native aarch64-apple-darwin "$CLIENT_BIN"
-build_native aarch64-apple-darwin "$AUTH_SERVER_BIN"
+build_native aarch64-apple-darwin
 package_unix aarch64-apple-darwin macos-aarch64
 
 echo "building Linux targets..."
-build_cross x86_64-unknown-linux-gnu "$CLIENT_BIN"
-build_cross x86_64-unknown-linux-gnu "$AUTH_SERVER_BIN"
+build_cross x86_64-unknown-linux-gnu
 package_unix x86_64-unknown-linux-gnu linux-x86_64
 
-build_cross aarch64-unknown-linux-gnu "$CLIENT_BIN"
-build_cross aarch64-unknown-linux-gnu "$AUTH_SERVER_BIN"
+build_cross aarch64-unknown-linux-gnu
 package_unix aarch64-unknown-linux-gnu linux-aarch64
 
 echo "building Windows target..."
-build_cross x86_64-pc-windows-gnu "$CLIENT_BIN"
-build_cross x86_64-pc-windows-gnu "$AUTH_SERVER_BIN"
+build_cross x86_64-pc-windows-gnu
 package_windows x86_64-pc-windows-gnu windows-x86_64
 
 echo "release artifacts written to $DIST_DIR"

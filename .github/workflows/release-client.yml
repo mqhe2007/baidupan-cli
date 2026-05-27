@@ -68,7 +68,6 @@ jobs:
         if: runner.os == 'macOS'
         env:
           BAIDUPAN_DEFAULT_APP_NAME: ${{ secrets.BAIDUPAN_APP_NAME }}
-          BAIDUPAN_DEFAULT_AUTH_SERVER: ${{ secrets.BAIDUPAN_AUTH_SERVER }}
           BAIDUPAN_DEFAULT_CRYPTO_PASSPHRASE: ${{ secrets.BAIDUPAN_CRYPTO_PASSPHRASE }}
         run: cargo build --locked --release --bin baidupan-cli --target ${{ matrix.target }}
 
@@ -76,7 +75,6 @@ jobs:
         if: runner.os == 'Linux' || runner.os == 'Windows'
         env:
           BAIDUPAN_DEFAULT_APP_NAME: ${{ secrets.BAIDUPAN_APP_NAME }}
-          BAIDUPAN_DEFAULT_AUTH_SERVER: ${{ secrets.BAIDUPAN_AUTH_SERVER }}
           BAIDUPAN_DEFAULT_CRYPTO_PASSPHRASE: ${{ secrets.BAIDUPAN_CRYPTO_PASSPHRASE }}
         run: cargo zigbuild --locked --release --bin baidupan-cli --target ${{ matrix.target }}
 

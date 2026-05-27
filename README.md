@@ -30,14 +30,12 @@
 
 - Rust stable
 - 百度网盘开放平台应用 `AppKey`、`SecretKey` 和应用目录名
-- 面向终端用户发布时，建议额外部署一个认证后端二进制，由它代持 `AppKey/SecretKey`
 
 ## 环境变量
 
-- `BAIDUPAN_APP_KEY`: 百度开放平台 AppKey。开发或直连认证模式需要
-- `BAIDUPAN_APP_SECRET`: 百度开放平台 SecretKey。开发或直连认证模式需要
-- `BAIDUPAN_APP_NAME`: 百度开放平台申请接入时填写的产品名称。CLI 会自动把所有远端路径映射到 `/apps/<应用名>/...`
-- `BAIDUPAN_AUTH_SERVER`: 可选。认证后端地址，例如 `https://auth.example.com`。设置后，CLI 的登录和 token 刷新会走你的后端，不再要求终端用户本地提供 `BAIDUPAN_APP_SECRET`。若未设置此变量且本地也未提供 `BAIDUPAN_APP_SECRET`，CLI 会自动回退到内置公共认证服务 `https://mengqinghe.com/baidupan-cli/auth`；**建议自行部署认证后端以保障可用性和数据安全**
+- `BAIDUPAN_APP_KEY`: 百度开放平台 AppKey。**必填**
+- `BAIDUPAN_APP_SECRET`: 百度开放平台 SecretKey。**必填**
+- `BAIDUPAN_APP_NAME`: 百度开放平台申请接入时填写的产品名称。CLI 会自动把所有远端路径映射到 `/apps/<应用名>/...`。**必填**
 - `BAIDUPAN_CRYPTO_PASSPHRASE`: 可选。上传加密或下载解密时优先读取；未设置时会在终端交互输入
 
 ## 构建
@@ -48,21 +46,12 @@ cargo build
 
 ## 登录
 
-开发或本地直连百度 OAuth：
+设置环境变量后执行 login 命令：
 
 ```bash
 export BAIDUPAN_APP_KEY=your_app_key
 export BAIDUPAN_APP_SECRET=your_app_secret
 export BAIDUPAN_APP_NAME=your_product_name
-
-cargo run -- login
-```
-
-发布给终端用户时，推荐改成：
-
-```bash
-export BAIDUPAN_APP_NAME=your_product_name
-export BAIDUPAN_AUTH_SERVER=https://auth.example.com
 
 cargo run -- login
 ```
@@ -74,51 +63,6 @@ cargo run -- login
 - 二维码地址 `qrcode_url`
 
 授权完成后，token 会保存在系统配置目录下的 `baidupan-cli/tokens.json`。
-
-## 认证后端
-
-仓库同时提供一个认证后端二进制：`baidupan-auth-server`。它只负责三件事：
-
-- 申请设备码
-- 轮询设备码换取 token
-- 使用 refresh token 刷新 access token
-
-它不代理上传、下载或目录操作，所以不会承载文件流量。
-
-构建：
-
-```bash
-cargo build --release --bin baidupan-auth-server
-```
-
-运行：
-
-```bash
-export BAIDUPAN_APP_KEY=your_app_key
-export BAIDUPAN_APP_SECRET=your_app_secret
-export BAIDUPAN_APP_NAME=your_product_name
-export BAIDUPAN_AUTH_SERVER_BIND=0.0.0.0:28681
-
-./target/release/baidupan-auth-server
-```
-
-如果你在构建时通过环境变量提供了 `BAIDUPAN_DEFAULT_APP_KEY`、`BAIDUPAN_DEFAULT_APP_SECRET`、`BAIDUPAN_DEFAULT_APP_NAME`，服务端二进制也会把它们作为编译期默认值嵌入；运行时同名环境变量仍然优先。
-
-CLI 指向它：
-
-```bash
-export BAIDUPAN_APP_NAME=your_product_name
-export BAIDUPAN_AUTH_SERVER=http://your-server:28681
-
-./target/release/baidupan-cli login
-```
-
-说明：
-
-- 认证后端必须部署在你控制的机器上，不要随 CLI 一起分发给终端用户。
-- 终端用户侧不再需要 `BAIDUPAN_APP_SECRET`。
-- 认证后端当前只转发 OAuth 相关能力，现有文件上传下载仍由 CLI 直接调用百度网盘开放平台。
-- 若未配置 `BAIDUPAN_AUTH_SERVER` 且本地也未提供 `BAIDUPAN_APP_SECRET`，CLI 会自动使用内置公共认证服务 `https://mengqinghe.com/baidupan-cli/auth`。该服务仅供快速体验，**强烈建议面向真实用户时自行部署认证后端**。
 
 ## 目录与文件命令
 
@@ -227,10 +171,9 @@ git push origin v0.1.0
 
 说明：
 
-- Release 资产只包含客户端 `baidupan-cli`，不会打包 `baidupan-auth-server`
-- 认证后端二进制仍由你自己单独构建和部署
-- `release-client` workflow 会把仓库的 `BAIDUPAN_APP_NAME`、`BAIDUPAN_AUTH_SERVER`、`BAIDUPAN_CRYPTO_PASSPHRASE` Repository secrets 作为客户端的编译期默认值注入 Release 产物
-- 终端用户直接运行 Release 客户端时，不再需要额外配置上述三个值；如果用户自己设置了同名环境变量，运行时环境变量仍然优先
+- Release 资产只包含客户端 `baidupan-cli`
+- `release-client` workflow 会把仓库的 `BAIDUPAN_APP_NAME`、`BAIDUPAN_CRYPTO_PASSPHRASE` Repository secrets 作为客户端的编译期默认值注入 Release 产物
+- 终端用户直接运行 Release 客户端时，不再需要额外配置上述值；如果用户自己设置了同名环境变量，运行时环境变量仍然优先
 
 本地构建一套多平台正式发行包：
 
@@ -240,13 +183,10 @@ scripts/release-client-local.sh v0.1.0
 
 说明：
 
-- 脚本会在存在 `.env` 时自动读取，并把 `BAIDUPAN_APP_KEY`、`BAIDUPAN_APP_SECRET`、`BAIDUPAN_APP_NAME`、`BAIDUPAN_AUTH_SERVER`、`BAIDUPAN_CRYPTO_PASSPHRASE` 映射成编译期默认值
-- 本地脚本会一起打包 `baidupan-cli` 和 `baidupan-auth-server`，适合开发者或你自己的业务交付场景
+- 脚本会在存在 `.env` 时自动读取，并把 `BAIDUPAN_APP_KEY`、`BAIDUPAN_APP_SECRET`、`BAIDUPAN_APP_NAME`、`BAIDUPAN_CRYPTO_PASSPHRASE` 映射成编译期默认值
 - 本地多平台构建默认覆盖：Linux x86_64、Linux ARM64、Windows x86_64、macOS x86_64、macOS ARM64
 - 需要预先安装 `zig` 和 `cargo-zigbuild`，脚本会自动执行 `rustup target add`
-- 产物默认输出到 `dist/<版本>/`，打包文件名为 `baidupan-toolkit-<版本>-<平台>.tar.gz|zip`
-- 本地打包时 `BAIDUPAN_AUTH_SERVER` 是可选项；如果未提供，打出来的客户端只是没有内置认证后端默认地址
-- 用本地脚本打出的 `baidupan-auth-server` 现在也会带上 `.env` 里的 AppKey、AppSecret、AppName 默认值；部署时可以不再额外设置这三项，除非你想在运行时覆盖它们
+- 产物默认输出到 `dist/<版本>/`，打包文件名为 `baidupan-<版本>-<平台>.tar.gz|zip`
 
 ## 说明
 

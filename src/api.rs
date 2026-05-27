@@ -144,7 +144,7 @@ impl PanClient {
         let http = Client::builder().user_agent(USER_AGENT).build()?;
         Ok(Self {
             http,
-            oauth: OAuthClient::new(&credentials)?,
+            oauth: OAuthClient::new()?,
             credentials,
             token_store,
         })

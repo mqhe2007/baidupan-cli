@@ -16,8 +16,10 @@ const SALT_LEN: usize = 16;
 const NONCE_LEN: usize = 12;
 const KEY_LEN: usize = 32;
 const HEADER_LEN: usize = MAGIC_V1.len() + SALT_LEN + NONCE_LEN;
+#[allow(dead_code)]
 const HEADER_V2_LEN: usize = MAGIC_V2.len() + SALT_LEN + 8; // 8 reserved
 const CHUNK_SIZE: usize = 64 * 1024 * 1024; // 64 MiB
+#[allow(dead_code)]
 const CHUNK_META_LEN: usize = NONCE_LEN + 4; // nonce + u32 length
 
 // ── V1 (whole-file AES-256-GCM) ────────────────────────────────────────────
