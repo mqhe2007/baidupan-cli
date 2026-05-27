@@ -116,8 +116,8 @@ pub fn encrypt_file_streaming(
         let mut nonce = [0_u8; NONCE_LEN];
         OsRng.fill_bytes(&mut nonce);
 
-        let cipher = Aes256Gcm::new_from_slice(key.as_slice())
-            .map_err(|e| Error::Crypto(e.to_string()))?;
+        let cipher =
+            Aes256Gcm::new_from_slice(key.as_slice()).map_err(|e| Error::Crypto(e.to_string()))?;
         let ciphertext = cipher
             .encrypt(Nonce::from_slice(&nonce), &buf[..n])
             .map_err(|e| Error::Crypto(e.to_string()))?;
@@ -131,8 +131,7 @@ pub fn encrypt_file_streaming(
             .map_err(|e| Error::Crypto(e.to_string()))?;
     }
 
-    dest.flush()
-        .map_err(|e| Error::Crypto(e.to_string()))?;
+    dest.flush().map_err(|e| Error::Crypto(e.to_string()))?;
     Ok(())
 }
 
@@ -178,9 +177,7 @@ pub fn decrypt_file_streaming(
             Ok(()) => {}
             Err(e) if e.kind() == std::io::ErrorKind::UnexpectedEof => break,
             Err(e) => {
-                return Err(Error::Crypto(format!(
-                    "failed to read chunk nonce: {e}"
-                )));
+                return Err(Error::Crypto(format!("failed to read chunk nonce: {e}")));
             }
         }
 
@@ -197,20 +194,17 @@ pub fn decrypt_file_streaming(
             .read_exact(&mut ciphertext)
             .map_err(|e| Error::Crypto(format!("failed to read chunk payload: {e}")))?;
 
-        let cipher = Aes256Gcm::new_from_slice(key.as_slice())
-            .map_err(|e| Error::Crypto(e.to_string()))?;
+        let cipher =
+            Aes256Gcm::new_from_slice(key.as_slice()).map_err(|e| Error::Crypto(e.to_string()))?;
         let plaintext = cipher
             .decrypt(Nonce::from_slice(&nonce), &ciphertext[..])
-            .map_err(|_| {
-                Error::Crypto("invalid passphrase or corrupted ciphertext".to_string())
-            })?;
+            .map_err(|_| Error::Crypto("invalid passphrase or corrupted ciphertext".to_string()))?;
 
         dest.write_all(&plaintext)
             .map_err(|e| Error::Crypto(e.to_string()))?;
     }
 
-    dest.flush()
-        .map_err(|e| Error::Crypto(e.to_string()))?;
+    dest.flush().map_err(|e| Error::Crypto(e.to_string()))?;
     Ok(())
 }
 
@@ -332,8 +326,7 @@ mod tests {
         let dec_path = temp_dir.path().join("dec.bin");
         fs::write(&enc_path, &encrypted_v1).expect("write v1");
 
-        let err =
-            decrypt_file_streaming(&enc_path, &dec_path, "passphrase").expect_err("v1 as v2");
+        let err = decrypt_file_streaming(&enc_path, &dec_path, "passphrase").expect_err("v1 as v2");
         assert!(err.to_string().contains("not a V2 encrypted file"));
     }
 }

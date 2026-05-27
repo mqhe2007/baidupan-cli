@@ -460,10 +460,7 @@ mod tests {
             .decrypt_downloaded_file(&encrypted, &output)
             .expect("decrypt v2");
 
-        assert_eq!(
-            fs::read(&output).expect("read output"),
-            b"streaming world"
-        );
+        assert_eq!(fs::read(&output).expect("read output"), b"streaming world");
         std::env::remove_var(CRYPTO_PASSPHRASE_ENV);
     }
 
