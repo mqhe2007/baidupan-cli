@@ -136,4 +136,14 @@ echo "building Windows target..."
 build_cross x86_64-pc-windows-gnu
 package_windows x86_64-pc-windows-gnu windows-x86_64
 
+(
+  cd "$DIST_DIR"
+  find . -maxdepth 1 -type f \( -name '*.tar.gz' -o -name '*.zip' \) -print0 \
+    | sort -z \
+    | xargs -0 sha256sum \
+    | sed 's|\./||' \
+    > SHA256SUMS
+)
+
 echo "release artifacts written to $DIST_DIR"
+echo "checksums: $DIST_DIR/SHA256SUMS"

@@ -8,9 +8,46 @@ on:
 permissions:
   contents: write
 
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_ZIGBUILD_VERSION: '0.20.1'
+  ZIG_VERSION: '0.13.0'
+
 jobs:
+  verify:
+    name: Verify release gate
+    runs-on: ubuntu-latest
+    env:
+      FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Restore Cargo cache
+        uses: Swatinem/rust-cache@v2
+
+      - name: Verify tag matches Cargo.toml version
+        run: bash scripts/verify-release-version.sh "${GITHUB_REF_NAME}"
+
+      - name: Check formatting
+        run: cargo fmt --check
+
+      - name: Run tests
+        run: cargo test --locked
+
+      - name: Run clippy
+        run: cargo clippy --all-targets --locked -- -D warnings
+
   build:
     name: Build client (${{ matrix.label }})
+    needs: verify
     runs-on: ${{ matrix.os }}
     env:
       FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
@@ -60,11 +97,22 @@ jobs:
         if: runner.os == 'Linux' || runner.os == 'Windows'
         uses: goto-bus-stop/setup-zig@v2
         with:
-          version: 0.13.0
+          version: ${{ env.ZIG_VERSION }}
+
+      - name: Cache cargo-zigbuild
+        if: runner.os == 'Linux' || runner.os == 'Windows'
+        uses: actions/cache@v4
+        id: zigbuild-cache
+        with:
+          path: |
+            ~/.cargo/bin/cargo-zigbuild
+            ~/.cargo/.crates.toml
+            ~/.cargo/.crates2.json
+          key: cargo-zigbuild-${{ env.CARGO_ZIGBUILD_VERSION }}-${{ runner.os }}
 
       - name: Install cargo-zigbuild for cross builds
-        if: runner.os == 'Linux' || runner.os == 'Windows'
-        run: cargo install cargo-zigbuild --locked
+        if: (runner.os == 'Linux' || runner.os == 'Windows') && steps.zigbuild-cache.outputs.cache-hit != 'true'
+        run: cargo install cargo-zigbuild --locked --version ${{ env.CARGO_ZIGBUILD_VERSION }}
 
       - name: Build client binary (native)
         if: runner.os == 'macOS'
@@ -124,9 +172,22 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           path: dist
+          merge-multiple: true
+
+      - name: Generate SHA256 checksums
+        shell: bash
+        run: |
+          cd dist
+          find . -type f \( -name '*.tar.gz' -o -name '*.zip' \) -print0 \
+            | sort -z \
+            | xargs -0 sha256sum \
+            | sed 's|\./||' \
+            > SHA256SUMS
+          cat SHA256SUMS
 
       - name: Publish release assets
         uses: softprops/action-gh-release@v2
         with:
-          files: dist/**/*
+          files: dist/**
           generate_release_notes: true
+          prerelease: ${{ contains(github.ref_name, '-') }}

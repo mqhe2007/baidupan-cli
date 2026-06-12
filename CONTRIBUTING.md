@@ -39,17 +39,24 @@ src/
 仓库已配置 GitHub Actions：
 
 - `ci`: 在 `main` 分支推送和 Pull Request 上执行 `cargo fmt --check && cargo test && cargo clippy --all-targets -- -D warnings`
-- `release-client`: 在推送 `v*` tag 时，构建并发布客户端二进制 `baidupan-cli`，覆盖 Linux x86_64、Linux ARM64、Windows x86_64、macOS x86_64、macOS ARM64
+- `release-client`: 在推送 `v*` tag 时，先校验 tag 与 `Cargo.toml` 版本一致并跑完整质量门禁，再构建并发布客户端二进制 `baidupan-cli`，覆盖 Linux x86_64、Linux ARM64、Windows x86_64、macOS x86_64、macOS ARM64
 
 发布客户端：
 
 ```bash
-git tag v0.1.0
-git push origin v0.1.0
+# 1. 先更新 Cargo.toml 中的 version
+# 2. 提交变更
+scripts/verify-release-version.sh v0.3.1
+git tag v0.3.1
+git push origin main
+git push origin v0.3.1
 ```
 
 说明：
 
+- tag 必须形如 `v0.3.1`，且与 `Cargo.toml` 的 `[package].version` 完全一致，否则 release workflow 会在构建前失败
+- release workflow 会额外执行 `cargo fmt --check`、`cargo test --locked`、`cargo clippy --locked`
+- Release 资产包含各平台压缩包和 `SHA256SUMS` 校验文件；带 `-` 的 tag（如 `v0.4.0-beta.1`）会标记为 GitHub prerelease
 - Release 资产只包含客户端 `baidupan-cli`
 - `release-client` workflow 会把仓库的 `BAIDUPAN_APP_NAME`、`BAIDUPAN_CRYPTO_PASSPHRASE` Repository secrets 作为客户端的编译期默认值注入 Release 产物
 - 终端用户直接运行 Release 客户端时，不再需要额外配置上述值；如果用户自己设置了同名环境变量，运行时环境变量仍然优先

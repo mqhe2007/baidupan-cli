@@ -20,8 +20,16 @@ const LOCATE_UPLOAD_API: &str = "https://d.pcs.baidu.com/rest/2.0/pcs/file";
 const UPLOAD_APP_ID: &str = "250528";
 const UPLOAD_VERSION: &str = "2.0";
 
-pub const ONDUP_OVERWRITE: &str = "overwrite";
-pub const ONDUP_FAIL: &str = "fail";
+const RTYPE_FAIL_ON_CONFLICT: &str = "0";
+const RTYPE_OVERWRITE: &str = "3";
+
+fn upload_rtype(overwrite: bool) -> &'static str {
+    if overwrite {
+        RTYPE_OVERWRITE
+    } else {
+        RTYPE_FAIL_ON_CONFLICT
+    }
+}
 
 #[derive(Debug, Clone)]
 pub struct PanClient {
@@ -100,7 +108,7 @@ pub struct UploadRequest<'a> {
     pub block_list: &'a [String],
     pub encrypted: bool,
     pub resume_uploadid: Option<&'a str>,
-    pub ondup: &'a str,
+    pub overwrite: bool,
 }
 
 struct UploadPartsRequest<'a> {
@@ -213,14 +221,14 @@ impl PanClient {
         let access_token = self.ensure_access_token().await?;
         let remote_path = normalize_remote_path(request.remote_path)?;
         let block_list_json = serde_json::to_string(request.block_list)?;
+        let rtype = upload_rtype(request.overwrite);
         let mut precreate_form = vec![
             ("path".to_string(), remote_path.clone()),
             ("size".to_string(), request.size.to_string()),
             ("isdir".to_string(), "0".to_string()),
             ("autoinit".to_string(), "1".to_string()),
-            ("rtype".to_string(), "0".to_string()),
+            ("rtype".to_string(), rtype.to_string()),
             ("block_list".to_string(), block_list_json.clone()),
-            ("ondup".to_string(), request.ondup.to_string()),
         ];
         if let Some(uploadid) = request.resume_uploadid.filter(|value| !value.is_empty()) {
             precreate_form.push(("uploadid".to_string(), uploadid.to_string()));
@@ -278,7 +286,7 @@ impl PanClient {
                 ("path", remote_path.clone()),
                 ("size", request.size.to_string()),
                 ("isdir", "0".to_string()),
-                ("rtype", "0".to_string()),
+                ("rtype", rtype.to_string()),
                 ("uploadid", uploadid),
                 ("block_list", block_list_json),
             ])
@@ -678,7 +686,7 @@ fn openapi_errno_hint(errno: i64) -> Option<&'static str> {
         -3 => Some("文件不存在；请确认远端路径或文件标识是否正确"),
         -6 => Some("身份验证失败；请检查 access_token 是否有效，并确认授权成功"),
         -10 => Some("网盘容量不足；请清理空间后重试上传"),
-        -8 => Some("远端已存在同名文件；请更换路径，或后续支持覆盖/重命名策略后再试"),
+        -8 => Some("远端已存在同名文件；请更换路径，或使用 upload --force 覆盖"),
         -9 => Some("文件或目录不存在；请确认路径正确，或目标尚未被删除/移动"),
         -7 => Some("文件名或路径不合法，或者当前授权无权访问该路径；请检查远端路径和应用权限"),
         1 => Some("百度开放平台返回未知错误；如果频繁出现，建议稍后重试或联系平台支持"),
@@ -830,6 +838,12 @@ fn parent_remote_dir(path: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn maps_upload_overwrite_to_rtype() {
+        assert_eq!(upload_rtype(false), "0");
+        assert_eq!(upload_rtype(true), "3");
+    }
 
     #[test]
     fn normalizes_remote_paths() {

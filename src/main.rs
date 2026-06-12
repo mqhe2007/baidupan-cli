@@ -151,11 +151,7 @@ async fn run() -> Result<()> {
                         block_list: &block_list,
                         encrypted: prepared.encrypted,
                         resume_uploadid,
-                        ondup: if force {
-                            baidupan_cli::api::ONDUP_OVERWRITE
-                        } else {
-                            baidupan_cli::api::ONDUP_FAIL
-                        },
+                        overwrite: force,
                     },
                     move |uploadid| {
                         let state = UploadResumeState {
@@ -501,11 +497,7 @@ async fn run_upload(
                 block_list: &block_list,
                 encrypted: prepared.encrypted,
                 resume_uploadid,
-                ondup: if force {
-                    baidupan_cli::api::ONDUP_OVERWRITE
-                } else {
-                    baidupan_cli::api::ONDUP_FAIL
-                },
+                overwrite: force,
             },
             move |uploadid| {
                 let state = UploadResumeState {
